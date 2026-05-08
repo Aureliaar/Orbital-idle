@@ -13,8 +13,7 @@ Run `npm run build` and `npm run lint` before claiming a change works. The visua
 
 ## Branch & deploy gotchas
 
-- Default branch is **`Main`** (capital M), not `main`.
-- `.github/workflows/deploy.yml` triggers on `main` (lowercase). Git refs are case-sensitive, so pushes to the actual default branch do **not** auto-deploy. Use the workflow's `workflow_dispatch` until the trigger is fixed.
+- Default branch is **`Main`** (capital M), not `main`. `.github/workflows/deploy.yml` triggers on `Main` to match. Git refs are case-sensitive — if you ever rename the branch, update the trigger too.
 - Live site: https://aureliaar.github.io/Orbital-idle/
 - `vite.config.ts` sets `base: '/Orbital-idle/'` — keep it; Pages needs it to resolve assets.
 
