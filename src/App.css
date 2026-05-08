@@ -1,0 +1,36 @@
+main {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+main h1 {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 3.5rem);
+  letter-spacing: 0.02em;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--text-m, #888);
+  font-size: 0.95rem;
+}
+
+.counter {
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(3rem, 18vw, 6rem);
+  margin: 12px 0;
+  color: var(--accent, #6cf);
+}
+
+.hint {
+  margin: 0;
+  max-width: 28ch;
+  color: var(--text-m, #888);
+  font-size: 0.85rem;
+}
