@@ -17,20 +17,33 @@ main h1 {
 
 .tagline {
   margin: 0;
-  color: var(--text-m, #888);
+  color: var(--text);
   font-size: 0.95rem;
 }
 
-.counter {
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(3rem, 18vw, 6rem);
-  margin: 12px 0;
-  color: var(--accent, #6cf);
+.orbit {
+  width: min(440px, 82vw);
+  aspect-ratio: 1;
+  display: block;
+  margin: 12px auto 4px;
 }
 
-.hint {
-  margin: 0;
-  max-width: 28ch;
-  color: var(--text-m, #888);
-  font-size: 0.85rem;
+.pill {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.pill.open {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
 }
