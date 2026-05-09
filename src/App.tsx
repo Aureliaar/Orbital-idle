@@ -2,47 +2,60 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const EARTH_PERIOD_S = 8
+const MEDIANT_PERIOD_S = (EARTH_PERIOD_S * 4) / 5
 const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
-const WINDOW_THRESHOLD_RAD = 0.18
 const PROBE_DURATION_S = 1.0
+const ALIGN_LINE_PROXIMITY = 0.93
 
-// Orbital frequencies are sub-audible. Transpose Earth to A2 (110 Hz) so the
-// drone sits in a warm low-mid register; the 3:2 ratio puts the dominant on
-// E3 (165 Hz).
+// Earth → A2 (110 Hz). 5:4 puts Mediant on C#3, 3:2 puts Dominant on E3.
+// Together: a just-tuned A major triad (4:5:6).
 const AUDIO_TRANSPOSE = 110 / (1 / EARTH_PERIOD_S)
 const EARTH_HZ = (1 / EARTH_PERIOD_S) * AUDIO_TRANSPOSE
+const MEDIANT_HZ = (1 / MEDIANT_PERIOD_S) * AUDIO_TRANSPOSE
 const DOMINANT_HZ = (1 / DOMINANT_PERIOD_S) * AUDIO_TRANSPOSE
-const DRONE_GAIN = 0.05
-const WINDOW_GAIN = 0.08
 
-type Probe = { startMs: number; angle: number }
+// Earth is the constant tonic. Each non-tonic voice peak-and-holds: gain
+// climbs slowly toward a proximity-driven target and never decays back on
+// its own. Pressing launch triggers the release that resolves the chord.
+const EARTH_DRONE_GAIN = 0.025
+const VOICE_FLOOR_GAIN = 0.002
+const VOICE_PEAK_GAIN = 0.22
+const SWELL_ATTACK_TAU = 1.8
+const SWELL_RELEASE_TAU = 0.55
+const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
 
-type AudioGraph = {
-  ctx: AudioContext
-  master: GainNode
-  earthGain: GainNode
-  domGain: GainNode
-}
+type Probe = { startMs: number; angle: number; rStart: number; rEnd: number }
+type VoiceState = { held: number; releasing: boolean }
+type AudioGraph = { ctx: AudioContext; master: GainNode; voices: GainNode[] }
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [windowOpen, setWindowOpen] = useState(false)
+  const [armed, setArmed] = useState(false)
   const [audioOn, setAudioOn] = useState(false)
   const probeRef = useRef<Probe | null>(null)
-  const domAngleRef = useRef(0)
   const audioRef = useRef<AudioGraph | null>(null)
+  const swellsRef = useRef<VoiceState[]>([
+    { held: VOICE_FLOOR_GAIN, releasing: false },
+    { held: VOICE_FLOOR_GAIN, releasing: false },
+  ])
+  const launchTargetRef = useRef<{ angle: number; rStart: number; rEnd: number } | null>(null)
+  const launchPendingRef = useRef(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const ctx2d = canvas.getContext('2d')
+    if (!ctx2d) return
 
     let raf = 0
     const start = performance.now()
+    let lastNow = start
 
     const draw = (now: number) => {
       const t = (now - start) / 1000
+      const dt = Math.min(0.1, (now - lastNow) / 1000)
+      lastNow = now
+
       const dpr = window.devicePixelRatio || 1
       const cssW = canvas.clientWidth
       const cssH = canvas.clientHeight
@@ -50,17 +63,19 @@ function App() {
         canvas.width = cssW * dpr
         canvas.height = cssH * dpr
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, cssW, cssH)
+      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx2d.clearRect(0, 0, cssW, cssH)
 
       const cx = cssW / 2
       const cy = cssH / 2
-      const rOuter = Math.min(cssW, cssH) * 0.38
-      const rInner = rOuter * 0.66
+      const R = Math.min(cssW, cssH) * 0.4
+      const rOuter = R
+      const rMid = R * 0.81
+      const rInner = R * 0.62
 
       const earthAngle = (t / EARTH_PERIOD_S) * 2 * Math.PI
+      const medAngle = (t / MEDIANT_PERIOD_S) * 2 * Math.PI
       const domAngle = (t / DOMINANT_PERIOD_S) * 2 * Math.PI
-      domAngleRef.current = domAngle
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
@@ -68,51 +83,105 @@ function App() {
       const accentBg = styles.getPropertyValue('--accent-bg').trim() || 'rgba(170,59,255,0.1)'
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
 
-      let delta = Math.abs(((earthAngle - domAngle) % (2 * Math.PI)))
-      if (delta > Math.PI) delta = 2 * Math.PI - delta
-      const open = delta < WINDOW_THRESHOLD_RAD
-
-      ctx.strokeStyle = border
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI)
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.arc(cx, cy, rInner, 0, 2 * Math.PI)
-      ctx.stroke()
-
-      if (open) {
-        ctx.strokeStyle = accent
-        ctx.fillStyle = accentBg
-        ctx.lineWidth = 1.5
-        const ex = cx + Math.cos(earthAngle) * rOuter
-        const ey = cy + Math.sin(earthAngle) * rOuter
-        const dx = cx + Math.cos(domAngle) * rInner
-        const dy = cy + Math.sin(domAngle) * rInner
-        ctx.beginPath()
-        ctx.moveTo(ex, ey)
-        ctx.lineTo(dx, dy)
-        ctx.stroke()
+      const angleDelta = (a: number) => {
+        let d = Math.abs(((earthAngle - a) % (2 * Math.PI)))
+        if (d > Math.PI) d = 2 * Math.PI - d
+        return d
       }
 
-      ctx.fillStyle = textH
-      ctx.beginPath()
-      ctx.arc(cx, cy, 3, 0, 2 * Math.PI)
-      ctx.fill()
+      const bodies = [
+        { delta: angleDelta(medAngle), angle: medAngle, ring: rMid },
+        { delta: angleDelta(domAngle), angle: domAngle, ring: rInner },
+      ]
+
+      const swells = swellsRef.current
+      if (launchPendingRef.current) {
+        launchPendingRef.current = false
+        for (const s of swells) {
+          if (s.held > VOICE_FLOOR_GAIN + 0.001) s.releasing = true
+        }
+      }
+      for (let i = 0; i < bodies.length; i++) {
+        const b = bodies[i]
+        const s = swells[i]
+        const proximity = 1 - b.delta / Math.PI
+        const target = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * Math.pow(proximity, 3)
+        if (s.releasing) {
+          s.held += (VOICE_FLOOR_GAIN - s.held) * (1 - Math.exp(-dt / SWELL_RELEASE_TAU))
+          if (s.held < VOICE_FLOOR_GAIN + 0.0005) {
+            s.held = VOICE_FLOOR_GAIN
+            s.releasing = false
+          }
+        } else if (target > s.held) {
+          s.held += (target - s.held) * (1 - Math.exp(-dt / SWELL_ATTACK_TAU))
+        }
+      }
+
+      const a = audioRef.current
+      if (a) {
+        const tnow = a.ctx.currentTime
+        for (let i = 0; i < swells.length; i++) {
+          a.voices[i].gain.setTargetAtTime(swells[i].held, tnow, 0.04)
+        }
+      }
+
+      let bestIdx = -1
+      let bestGain = LAUNCH_ARM_GAIN
+      for (let i = 0; i < swells.length; i++) {
+        if (!swells[i].releasing && swells[i].held > bestGain) {
+          bestGain = swells[i].held
+          bestIdx = i
+        }
+      }
+      const isArmed = bestIdx >= 0
+      launchTargetRef.current = isArmed
+        ? { angle: bodies[bestIdx].angle, rStart: bodies[bestIdx].ring, rEnd: rOuter }
+        : null
+
+      ctx2d.strokeStyle = border
+      ctx2d.lineWidth = 1
+      for (const r of [rOuter, rMid, rInner]) {
+        ctx2d.beginPath()
+        ctx2d.arc(cx, cy, r, 0, 2 * Math.PI)
+        ctx2d.stroke()
+      }
 
       const ex = cx + Math.cos(earthAngle) * rOuter
       const ey = cy + Math.sin(earthAngle) * rOuter
-      ctx.fillStyle = textH
-      ctx.beginPath()
-      ctx.arc(ex, ey, 7, 0, 2 * Math.PI)
-      ctx.fill()
 
-      const dx = cx + Math.cos(domAngle) * rInner
-      const dy = cy + Math.sin(domAngle) * rInner
-      ctx.fillStyle = accent
-      ctx.beginPath()
-      ctx.arc(dx, dy, 6, 0, 2 * Math.PI)
-      ctx.fill()
+      ctx2d.strokeStyle = accent
+      ctx2d.fillStyle = accentBg
+      ctx2d.lineWidth = 1.5
+      for (const b of bodies) {
+        const proximity = 1 - b.delta / Math.PI
+        if (proximity > ALIGN_LINE_PROXIMITY) {
+          const px = cx + Math.cos(b.angle) * b.ring
+          const py = cy + Math.sin(b.angle) * b.ring
+          ctx2d.beginPath()
+          ctx2d.moveTo(ex, ey)
+          ctx2d.lineTo(px, py)
+          ctx2d.stroke()
+        }
+      }
+
+      ctx2d.fillStyle = textH
+      ctx2d.beginPath()
+      ctx2d.arc(cx, cy, 3, 0, 2 * Math.PI)
+      ctx2d.fill()
+
+      ctx2d.fillStyle = textH
+      ctx2d.beginPath()
+      ctx2d.arc(ex, ey, 7, 0, 2 * Math.PI)
+      ctx2d.fill()
+
+      ctx2d.fillStyle = accent
+      for (const b of bodies) {
+        const bx = cx + Math.cos(b.angle) * b.ring
+        const by = cy + Math.sin(b.angle) * b.ring
+        ctx2d.beginPath()
+        ctx2d.arc(bx, by, 5.5, 0, 2 * Math.PI)
+        ctx2d.fill()
+      }
 
       const probe = probeRef.current
       if (probe) {
@@ -120,17 +189,17 @@ function App() {
         if (u >= 1) {
           probeRef.current = null
         } else {
-          const r = rInner + (rOuter - rInner) * u
-          const px = cx + Math.cos(probe.angle) * r
-          const py = cy + Math.sin(probe.angle) * r
-          ctx.fillStyle = accent
-          ctx.beginPath()
-          ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
-          ctx.fill()
+          const r = probe.rStart + (probe.rEnd - probe.rStart) * u
+          const ppx = cx + Math.cos(probe.angle) * r
+          const ppy = cy + Math.sin(probe.angle) * r
+          ctx2d.fillStyle = accent
+          ctx2d.beginPath()
+          ctx2d.arc(ppx, ppy, 3.5, 0, 2 * Math.PI)
+          ctx2d.fill()
         }
       }
 
-      setWindowOpen((prev) => (prev === open ? prev : open))
+      setArmed((prev) => (prev === isArmed ? prev : isArmed))
       raf = requestAnimationFrame(draw)
     }
 
@@ -149,7 +218,6 @@ function App() {
     master.gain.value = 0
     master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.6)
 
-    // Soft lowpass tames any harshness and keeps the drone warm.
     const filter = ctx.createBiquadFilter()
     filter.type = 'lowpass'
     filter.frequency.value = 1200
@@ -157,10 +225,9 @@ function App() {
     filter.connect(master).connect(ctx.destination)
 
     const stops: OscillatorNode[] = []
-    const makeVoice = (hz: number, pan: number) => {
+    const buildVoice = (hz: number, pan: number, baseGain: number, lfoHz: number) => {
       const voice = ctx.createGain()
-      voice.gain.value = DRONE_GAIN
-
+      voice.gain.value = baseGain
       const panner = ctx.createStereoPanner()
       panner.pan.value = pan
       voice.connect(panner).connect(filter)
@@ -168,26 +235,24 @@ function App() {
       const fund = ctx.createOscillator()
       fund.type = 'sine'
       fund.frequency.value = hz
-      const fundGain = ctx.createGain()
-      fundGain.gain.value = 1
-      fund.connect(fundGain).connect(voice)
+      const fg = ctx.createGain()
+      fg.gain.value = 1
+      fund.connect(fg).connect(voice)
 
-      // Quiet octave above adds body without dirtying the interval.
       const harm = ctx.createOscillator()
       harm.type = 'sine'
       harm.frequency.value = hz * 2
-      const harmGain = ctx.createGain()
-      harmGain.gain.value = 0.18
-      harm.connect(harmGain).connect(voice)
+      const hg = ctx.createGain()
+      hg.gain.value = 0.18
+      harm.connect(hg).connect(voice)
 
-      // Slow LFO on pitch — keeps the drone from sounding static.
       const lfo = ctx.createOscillator()
-      lfo.frequency.value = 0.17
-      const lfoDepth = ctx.createGain()
-      lfoDepth.gain.value = hz * 0.0025
-      lfo.connect(lfoDepth)
-      lfoDepth.connect(fund.frequency)
-      lfoDepth.connect(harm.frequency)
+      lfo.frequency.value = lfoHz
+      const ld = ctx.createGain()
+      ld.gain.value = hz * 0.0025
+      lfo.connect(ld)
+      ld.connect(fund.frequency)
+      ld.connect(harm.frequency)
 
       fund.start()
       harm.start()
@@ -196,43 +261,39 @@ function App() {
       return voice
     }
 
-    const earthGain = makeVoice(EARTH_HZ, -0.25)
-    const domGain = makeVoice(DOMINANT_HZ, 0.25)
-    audioRef.current = { ctx, master, earthGain, domGain }
+    buildVoice(EARTH_HZ, 0, EARTH_DRONE_GAIN, 0.17)
+    const med = buildVoice(MEDIANT_HZ, -0.3, swellsRef.current[0].held, 0.21)
+    const dom = buildVoice(DOMINANT_HZ, 0.3, swellsRef.current[1].held, 0.19)
+    audioRef.current = { ctx, master, voices: [med, dom] }
 
     return () => {
       audioRef.current = null
       const t = ctx.currentTime
       master.gain.cancelScheduledValues(t)
       master.gain.setValueAtTime(master.gain.value, t)
-      master.gain.linearRampToValueAtTime(0, t + 0.25)
-      for (const o of stops) o.stop(t + 0.3)
-      window.setTimeout(() => void ctx.close(), 400)
+      master.gain.linearRampToValueAtTime(0, t + 0.3)
+      for (const o of stops) o.stop(t + 0.35)
+      window.setTimeout(() => void ctx.close(), 450)
     }
   }, [audioOn])
 
-  useEffect(() => {
-    const a = audioRef.current
-    if (!a) return
-    const target = windowOpen ? WINDOW_GAIN : DRONE_GAIN
-    const t = a.ctx.currentTime
-    for (const g of [a.earthGain, a.domGain]) {
-      g.gain.cancelScheduledValues(t)
-      g.gain.setValueAtTime(g.gain.value, t)
-      g.gain.setTargetAtTime(target, t, 0.35)
-    }
-  }, [windowOpen, audioOn])
-
   const onLaunch = () => {
-    if (!windowOpen || probeRef.current) return
-    probeRef.current = { startMs: performance.now(), angle: domAngleRef.current }
+    const target = launchTargetRef.current
+    if (!target || probeRef.current) return
+    launchPendingRef.current = true
+    probeRef.current = {
+      startMs: performance.now(),
+      angle: target.angle,
+      rStart: target.rStart,
+      rEnd: target.rEnd,
+    }
   }
 
   return (
     <main>
       <h1>Orbital</h1>
-      <p className="tagline">Earth · Dominant — 3:2 resonance</p>
-      <canvas ref={canvasRef} className="orbit" aria-label="Two bodies in 3:2 resonance" />
+      <p className="tagline">Earth · Mediant · Dominant — 4:5:6 chord</p>
+      <canvas ref={canvasRef} className="orbit" aria-label="Three bodies in 4:5:6 resonance" />
       <div className="controls">
         <button
           type="button"
@@ -255,10 +316,10 @@ function App() {
         </button>
         <button
           type="button"
-          className={`launch${windowOpen ? ' armed' : ''}`}
+          className={`launch${armed ? ' armed' : ''}`}
           onClick={onLaunch}
-          disabled={!windowOpen}
-          aria-label="Launch transfer to outer orbit"
+          disabled={!armed}
+          aria-label="Launch transfer"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 3 L19 19 L12 15 L5 19 Z" fill="currentColor" />
