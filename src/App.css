@@ -341,3 +341,40 @@ main h1 {
   font-size: 0.75rem;
   color: var(--text);
 }
+
+.controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sound {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.sound:hover {
+  border-color: var(--accent-border);
+}
+
+.sound.on {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.sound svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
