@@ -21,11 +21,16 @@ const EARTH_DRONE_GAIN = 0.025
 const VOICE_FLOOR_GAIN = 0.002
 const VOICE_PEAK_GAIN = 0.22
 const SWELL_ATTACK_TAU = 1.8
+const SWELL_DECAY_TAU = 3.5
 const SWELL_RELEASE_TAU = 0.55
 const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
+// After a launch the voice stays disarmed (won't rebuild) until its target
+// drops back near floor, so the body has to actually leave the area before
+// the next swell can begin.
+const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
 
 type Probe = { startMs: number; angle: number; rStart: number; rEnd: number }
-type VoiceState = { held: number; releasing: boolean }
+type VoiceState = { held: number; releasing: boolean; armed: boolean }
 type AudioGraph = { ctx: AudioContext; master: GainNode; voices: GainNode[] }
 
 function App() {
@@ -35,8 +40,8 @@ function App() {
   const probeRef = useRef<Probe | null>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const swellsRef = useRef<VoiceState[]>([
-    { held: VOICE_FLOOR_GAIN, releasing: false },
-    { held: VOICE_FLOOR_GAIN, releasing: false },
+    { held: VOICE_FLOOR_GAIN, releasing: false, armed: true },
+    { held: VOICE_FLOOR_GAIN, releasing: false, armed: true },
   ])
   const launchTargetRef = useRef<{ angle: number; rStart: number; rEnd: number } | null>(null)
   const launchPendingRef = useRef(false)
@@ -98,7 +103,10 @@ function App() {
       if (launchPendingRef.current) {
         launchPendingRef.current = false
         for (const s of swells) {
-          if (s.held > VOICE_FLOOR_GAIN + 0.001) s.releasing = true
+          if (s.held > VOICE_FLOOR_GAIN + 0.001) {
+            s.releasing = true
+            s.armed = false
+          }
         }
       }
       for (let i = 0; i < bodies.length; i++) {
@@ -112,9 +120,12 @@ function App() {
             s.held = VOICE_FLOOR_GAIN
             s.releasing = false
           }
-        } else if (target > s.held) {
+        } else if (s.armed && target > s.held) {
           s.held += (target - s.held) * (1 - Math.exp(-dt / SWELL_ATTACK_TAU))
+        } else if (target < s.held) {
+          s.held += (target - s.held) * (1 - Math.exp(-dt / SWELL_DECAY_TAU))
         }
+        if (!s.armed && target < REARM_TARGET) s.armed = true
       }
 
       const a = audioRef.current
