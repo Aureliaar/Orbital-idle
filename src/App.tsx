@@ -5,7 +5,7 @@ const EARTH_PERIOD_S = 8
 const MEDIANT_PERIOD_S = (EARTH_PERIOD_S * 4) / 5
 const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
 const PROBE_DURATION_S = 1.0
-const ALIGN_LINE_PROXIMITY = 0.93
+const HALO_PROXIMITY = 0.93
 
 // Earth → A2 (110 Hz). 5:4 puts Mediant on C#3, 3:2 puts Dominant on E3.
 // Together: a just-tuned A major triad (4:5:6).
@@ -15,8 +15,8 @@ const MEDIANT_HZ = (1 / MEDIANT_PERIOD_S) * AUDIO_TRANSPOSE
 const DOMINANT_HZ = (1 / DOMINANT_PERIOD_S) * AUDIO_TRANSPOSE
 
 // Earth is the constant tonic. Each non-tonic voice peak-and-holds: gain
-// climbs slowly toward a proximity-driven target and never decays back on
-// its own. Pressing launch triggers the release that resolves the chord.
+// climbs slowly toward a proximity-driven target, sighs back when missed,
+// and resolves sharply when the player presses launch.
 const EARTH_DRONE_GAIN = 0.025
 const VOICE_FLOOR_GAIN = 0.002
 const VOICE_PEAK_GAIN = 0.22
@@ -24,12 +24,9 @@ const SWELL_ATTACK_TAU = 1.8
 const SWELL_DECAY_TAU = 3.5
 const SWELL_RELEASE_TAU = 0.55
 const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
-// After a launch the voice stays disarmed (won't rebuild) until its target
-// drops back near floor, so the body has to actually leave the area before
-// the next swell can begin.
 const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
 
-type Probe = { startMs: number; angle: number; rStart: number; rEnd: number }
+type Probe = { startMs: number; rStart: number }
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
 type AudioGraph = { ctx: AudioContext; master: GainNode; voices: GainNode[] }
 
@@ -43,7 +40,7 @@ function App() {
     { held: VOICE_FLOOR_GAIN, releasing: false, armed: true },
     { held: VOICE_FLOOR_GAIN, releasing: false, armed: true },
   ])
-  const launchTargetRef = useRef<{ angle: number; rStart: number; rEnd: number } | null>(null)
+  const launchTargetRingRef = useRef<number | null>(null)
   const launchPendingRef = useRef(false)
 
   useEffect(() => {
@@ -145,9 +142,7 @@ function App() {
         }
       }
       const isArmed = bestIdx >= 0
-      launchTargetRef.current = isArmed
-        ? { angle: bodies[bestIdx].angle, rStart: bodies[bestIdx].ring, rEnd: rOuter }
-        : null
+      launchTargetRingRef.current = isArmed ? bodies[bestIdx].ring : null
 
       ctx2d.strokeStyle = border
       ctx2d.lineWidth = 1
@@ -160,19 +155,23 @@ function App() {
       const ex = cx + Math.cos(earthAngle) * rOuter
       const ey = cy + Math.sin(earthAngle) * rOuter
 
-      ctx2d.strokeStyle = accent
       ctx2d.fillStyle = accentBg
-      ctx2d.lineWidth = 1.5
+      let anyAligned = false
       for (const b of bodies) {
         const proximity = 1 - b.delta / Math.PI
-        if (proximity > ALIGN_LINE_PROXIMITY) {
+        if (proximity > HALO_PROXIMITY) {
           const px = cx + Math.cos(b.angle) * b.ring
           const py = cy + Math.sin(b.angle) * b.ring
           ctx2d.beginPath()
-          ctx2d.moveTo(ex, ey)
-          ctx2d.lineTo(px, py)
-          ctx2d.stroke()
+          ctx2d.arc(px, py, 14, 0, 2 * Math.PI)
+          ctx2d.fill()
+          anyAligned = true
         }
+      }
+      if (anyAligned) {
+        ctx2d.beginPath()
+        ctx2d.arc(ex, ey, 16, 0, 2 * Math.PI)
+        ctx2d.fill()
       }
 
       ctx2d.fillStyle = textH
@@ -200,9 +199,9 @@ function App() {
         if (u >= 1) {
           probeRef.current = null
         } else {
-          const r = probe.rStart + (probe.rEnd - probe.rStart) * u
-          const ppx = cx + Math.cos(probe.angle) * r
-          const ppy = cy + Math.sin(probe.angle) * r
+          const r = probe.rStart + (rOuter - probe.rStart) * u
+          const ppx = cx + Math.cos(earthAngle) * r
+          const ppy = cy + Math.sin(earthAngle) * r
           ctx2d.fillStyle = accent
           ctx2d.beginPath()
           ctx2d.arc(ppx, ppy, 3.5, 0, 2 * Math.PI)
@@ -289,14 +288,12 @@ function App() {
   }, [audioOn])
 
   const onLaunch = () => {
-    const target = launchTargetRef.current
-    if (!target || probeRef.current) return
+    const ring = launchTargetRingRef.current
+    if (ring === null || probeRef.current) return
     launchPendingRef.current = true
     probeRef.current = {
       startMs: performance.now(),
-      angle: target.angle,
-      rStart: target.rStart,
-      rEnd: target.rEnd,
+      rStart: ring,
     }
   }
 

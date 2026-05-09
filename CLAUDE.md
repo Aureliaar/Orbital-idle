@@ -13,6 +13,8 @@ Tiny project. Read `DESIGN.md` first — it sets the premise (music theory **is*
 
 Run `npm run build` and `npm run lint` before claiming a change works. The visuals (canvas animation, future audio) can't be verified from a CLI — if you can't open a browser, say so explicitly rather than claim success.
 
+After pushing changes to a branch, always paste the Cloudflare Workers branch preview URL for that branch (see slug rules below) so it can be opened in a browser.
+
 ## Branch & deploy gotchas
 
 - Default branch is `main` (lowercase). `.github/workflows/deploy.yml` triggers on `main`. Git refs are case-sensitive — if you ever rename the branch, update the trigger.
