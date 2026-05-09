@@ -6,13 +6,12 @@ const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
 const WINDOW_THRESHOLD_RAD = 0.18
 const PROBE_DURATION_S = 1.0
 
-type Probe = { startMs: number; angle: number }
+type Probe = { startMs: number }
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [windowOpen, setWindowOpen] = useState(false)
   const probeRef = useRef<Probe | null>(null)
-  const domAngleRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -42,7 +41,6 @@ function App() {
 
       const earthAngle = (t / EARTH_PERIOD_S) * 2 * Math.PI
       const domAngle = (t / DOMINANT_PERIOD_S) * 2 * Math.PI
-      domAngleRef.current = domAngle
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
@@ -103,8 +101,8 @@ function App() {
           probeRef.current = null
         } else {
           const r = rInner + (rOuter - rInner) * u
-          const px = cx + Math.cos(probe.angle) * r
-          const py = cy + Math.sin(probe.angle) * r
+          const px = cx + Math.cos(earthAngle) * r
+          const py = cy + Math.sin(earthAngle) * r
           ctx.fillStyle = accent
           ctx.beginPath()
           ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
@@ -122,7 +120,7 @@ function App() {
 
   const onLaunch = () => {
     if (!windowOpen || probeRef.current) return
-    probeRef.current = { startMs: performance.now(), angle: domAngleRef.current }
+    probeRef.current = { startMs: performance.now() }
   }
 
   return (
