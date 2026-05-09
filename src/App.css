@@ -2,10 +2,10 @@ main {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   gap: 12px;
-  padding: 24px;
+  padding: 24px 16px 32px;
   text-align: center;
 }
 
@@ -18,54 +18,328 @@ main h1 {
 .tagline {
   margin: 0;
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
 .orbit {
   width: min(440px, 82vw);
   aspect-ratio: 1;
   display: block;
-  margin: 12px auto 4px;
+  margin: 8px auto 4px;
 }
 
-.launch {
-  width: 56px;
-  height: 56px;
+/* --- Tile strip --- */
+
+.tiles {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  width: min(720px, 96vw);
+}
+
+@media (max-width: 720px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.tile {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 80ms ease;
+}
+
+.tile:hover {
+  border-color: var(--text);
+}
+
+.tile:active {
+  transform: scale(0.98);
+}
+
+.tile.armed {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.tile.flying {
+  border-style: dashed;
+}
+
+.tile-progress {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0ms linear;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.tile.pressing .tile-progress {
+  transform: scaleX(1);
+  transition: transform 420ms linear;
+}
+
+.tile-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.tile-note {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.tile.armed .tile-note {
+  color: var(--accent);
+}
+
+.tile-roman {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text);
+  letter-spacing: 0.06em;
+}
+
+.tile-name {
+  font-size: 0.78rem;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile.armed .tile-name {
+  color: var(--accent);
+}
+
+.tile-interval {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text);
+}
+
+.tile-status {
+  margin-top: 4px;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.tile.armed .tile-status {
+  color: var(--accent);
+}
+
+/* --- Upgrade panel --- */
+
+.upgrade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.upgrade-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: rgba(8, 6, 13, 0.45);
+  cursor: default;
+}
+
+@media (prefers-color-scheme: dark) {
+  .upgrade-scrim {
+    background: rgba(0, 0, 0, 0.6);
+  }
+}
+
+.upgrade-panel {
+  position: relative;
+  width: min(460px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.upgrade-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upgrade-head h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.upgrade-sub {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.upgrade-x {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.upgrade-x:hover {
+  color: var(--text-h);
+  border-color: var(--text);
+}
+
+.upgrade-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.upgrade-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.upgrade-stats dt {
+  font-size: 0.7rem;
+  color: var(--text);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.upgrade-stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  color: var(--text-h);
+  font-size: 0.95rem;
+}
+
+.upgrade-list {
+  list-style: none;
+  margin: 0;
   padding: 0;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upgrade-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: not-allowed;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
-.launch:disabled {
-  opacity: 0.55;
+.upgrade-row-text {
+  min-width: 0;
 }
 
-.launch.armed {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent);
+.upgrade-row h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-h);
+}
+
+.upgrade-row p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.upgrade-row-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.upgrade-level {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.upgrade-row button {
+  width: 36px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   cursor: pointer;
 }
 
-.launch.armed:hover {
-  transform: scale(1.05);
+.upgrade-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.launch.armed:active {
-  transform: scale(0.95);
-}
-
-.launch svg {
-  display: block;
-  width: 22px;
-  height: 22px;
+.upgrade-foot {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text);
 }
 
 .controls {
