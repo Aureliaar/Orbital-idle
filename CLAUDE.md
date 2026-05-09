@@ -15,7 +15,8 @@ Run `npm run build` and `npm run lint` before claiming a change works. The visua
 
 - Default branch is **`Main`** (capital M), not `main`. `.github/workflows/deploy.yml` triggers on `Main` to match. Git refs are case-sensitive — if you ever rename the branch, update the trigger too.
 - Live site: https://aureliaar.github.io/Orbital-idle/
-- `vite.config.ts` sets `base: '/Orbital-idle/'` — keep it; Pages needs it to resolve assets.
+- Cloudflare also deploys this repo as a static-assets Worker (config in `wrangler.jsonc`). Production lands at `orbital.jacopo-sinigaglia.workers.dev`; non-production branches get preview URLs at `*-orbital.jacopo-sinigaglia.workers.dev`.
+- `vite.config.ts` switches `base` between `/Orbital-idle/` (GitHub Actions) and `/` (everywhere else) so both hosts resolve assets correctly. If you ever drop one host, simplify the base.
 
 ## Stack
 
