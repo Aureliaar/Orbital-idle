@@ -62,17 +62,17 @@ function App() {
       ctx.stroke()
 
       if (open) {
-        ctx.strokeStyle = accent
         ctx.fillStyle = accentBg
-        ctx.lineWidth = 1.5
         const ex = cx + Math.cos(earthAngle) * rOuter
         const ey = cy + Math.sin(earthAngle) * rOuter
         const dx = cx + Math.cos(domAngle) * rInner
         const dy = cy + Math.sin(domAngle) * rInner
         ctx.beginPath()
-        ctx.moveTo(ex, ey)
-        ctx.lineTo(dx, dy)
-        ctx.stroke()
+        ctx.arc(ex, ey, 16, 0, 2 * Math.PI)
+        ctx.fill()
+        ctx.beginPath()
+        ctx.arc(dx, dy, 14, 0, 2 * Math.PI)
+        ctx.fill()
       }
 
       ctx.fillStyle = textH
