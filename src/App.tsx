@@ -29,7 +29,12 @@ const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0
 type Probe = { startMs: number }
 type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
-type AudioGraph = { ctx: AudioContext; master: GainNode; voices: Map<BodyId, GainNode> }
+type AudioGraph = {
+  ctx: AudioContext
+  master: GainNode
+  voices: Map<BodyId, GainNode>
+  stops: OscillatorNode[]
+}
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
 
@@ -240,12 +245,40 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  useEffect(() => {
-    if (!audioOn) return
-    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  // iOS Safari only honors AudioContext.resume() called *synchronously* inside the
+  // user gesture that started it. Doing it from a useEffect after a setState (the
+  // previous shape of this code) leaves the context suspended on iPhone and no sound
+  // plays. Build the whole graph inside the click handler instead.
+  const stopAudio = useCallback((graph: AudioGraph) => {
+    const { ctx, master, stops } = graph
+    const tnow = ctx.currentTime
+    master.gain.cancelScheduledValues(tnow)
+    master.gain.setValueAtTime(master.gain.value, tnow)
+    master.gain.linearRampToValueAtTime(0, tnow + 0.3)
+    for (const o of stops) o.stop(tnow + 0.35)
+    window.setTimeout(() => void ctx.close(), 450)
+  }, [])
+
+  const handleSoundToggle = useCallback(() => {
+    const existing = audioRef.current
+    if (existing) {
+      audioRef.current = null
+      stopAudio(existing)
+      setAudioOn(false)
+      return
+    }
+
+    const Ctor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
     if (!Ctor) return
     const ctx = new Ctor()
     void ctx.resume()
+    // 1-sample silent buffer: legacy iOS unlock so subsequent oscillator output is audible.
+    const unlock = ctx.createBufferSource()
+    unlock.buffer = ctx.createBuffer(1, 1, 22050)
+    unlock.connect(ctx.destination)
+    unlock.start(0)
 
     const master = ctx.createGain()
     master.gain.value = 0
@@ -306,18 +339,18 @@ function App() {
       voices.set(body.id, buildVoice(hz, pan, base, lfoHz))
     })
 
-    audioRef.current = { ctx, master, voices }
+    audioRef.current = { ctx, master, voices, stops }
+    setAudioOn(true)
+  }, [stopAudio])
 
+  useEffect(() => {
     return () => {
+      const graph = audioRef.current
+      if (!graph) return
       audioRef.current = null
-      const tnow = ctx.currentTime
-      master.gain.cancelScheduledValues(tnow)
-      master.gain.setValueAtTime(master.gain.value, tnow)
-      master.gain.linearRampToValueAtTime(0, tnow + 0.3)
-      for (const o of stops) o.stop(tnow + 0.35)
-      window.setTimeout(() => void ctx.close(), 450)
+      stopAudio(graph)
     }
-  }, [audioOn])
+  }, [stopAudio])
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
@@ -339,7 +372,7 @@ function App() {
         <button
           type="button"
           className={`sound${audioOn ? ' on' : ''}`}
-          onClick={() => setAudioOn((v) => !v)}
+          onClick={handleSoundToggle}
           aria-pressed={audioOn}
           aria-label={audioOn ? 'Mute drone' : 'Play drone'}
         >
