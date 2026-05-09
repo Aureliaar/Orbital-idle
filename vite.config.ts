@@ -5,6 +5,6 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/Orbital-idle/',
+  base: './',
   plugins: [react(), cloudflare()],
 })
