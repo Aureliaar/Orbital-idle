@@ -6,14 +6,14 @@ const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
 const WINDOW_THRESHOLD_RAD = 0.18
 const PROBE_DURATION_S = 1.0
 
-// Orbital frequencies are sub-audible (0.125 Hz, 0.1875 Hz). Multiply by a
-// constant to land Earth on A3 (220 Hz); the 3:2 ratio carries the dominant
-// to E4 (330 Hz).
-const AUDIO_TRANSPOSE = 220 / (1 / EARTH_PERIOD_S)
+// Orbital frequencies are sub-audible. Transpose Earth to A2 (110 Hz) so the
+// drone sits in a warm low-mid register; the 3:2 ratio puts the dominant on
+// E3 (165 Hz).
+const AUDIO_TRANSPOSE = 110 / (1 / EARTH_PERIOD_S)
 const EARTH_HZ = (1 / EARTH_PERIOD_S) * AUDIO_TRANSPOSE
 const DOMINANT_HZ = (1 / DOMINANT_PERIOD_S) * AUDIO_TRANSPOSE
-const DRONE_GAIN = 0.04
-const WINDOW_GAIN = 0.12
+const DRONE_GAIN = 0.05
+const WINDOW_GAIN = 0.08
 
 type Probe = { startMs: number; angle: number }
 
@@ -147,33 +147,67 @@ function App() {
 
     const master = ctx.createGain()
     master.gain.value = 0
-    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.4)
-    master.connect(ctx.destination)
+    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.6)
 
-    const make = (hz: number) => {
-      const osc = ctx.createOscillator()
-      osc.type = 'sine'
-      osc.frequency.value = hz
-      const g = ctx.createGain()
-      g.gain.value = DRONE_GAIN
-      osc.connect(g).connect(master)
-      osc.start()
-      return { osc, g }
+    // Soft lowpass tames any harshness and keeps the drone warm.
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.value = 1200
+    filter.Q.value = 0.5
+    filter.connect(master).connect(ctx.destination)
+
+    const stops: OscillatorNode[] = []
+    const makeVoice = (hz: number, pan: number) => {
+      const voice = ctx.createGain()
+      voice.gain.value = DRONE_GAIN
+
+      const panner = ctx.createStereoPanner()
+      panner.pan.value = pan
+      voice.connect(panner).connect(filter)
+
+      const fund = ctx.createOscillator()
+      fund.type = 'sine'
+      fund.frequency.value = hz
+      const fundGain = ctx.createGain()
+      fundGain.gain.value = 1
+      fund.connect(fundGain).connect(voice)
+
+      // Quiet octave above adds body without dirtying the interval.
+      const harm = ctx.createOscillator()
+      harm.type = 'sine'
+      harm.frequency.value = hz * 2
+      const harmGain = ctx.createGain()
+      harmGain.gain.value = 0.18
+      harm.connect(harmGain).connect(voice)
+
+      // Slow LFO on pitch — keeps the drone from sounding static.
+      const lfo = ctx.createOscillator()
+      lfo.frequency.value = 0.17
+      const lfoDepth = ctx.createGain()
+      lfoDepth.gain.value = hz * 0.0025
+      lfo.connect(lfoDepth)
+      lfoDepth.connect(fund.frequency)
+      lfoDepth.connect(harm.frequency)
+
+      fund.start()
+      harm.start()
+      lfo.start()
+      stops.push(fund, harm, lfo)
+      return voice
     }
 
-    const earth = make(EARTH_HZ)
-    const dom = make(DOMINANT_HZ)
-    audioRef.current = { ctx, master, earthGain: earth.g, domGain: dom.g }
+    const earthGain = makeVoice(EARTH_HZ, -0.25)
+    const domGain = makeVoice(DOMINANT_HZ, 0.25)
+    audioRef.current = { ctx, master, earthGain, domGain }
 
     return () => {
       audioRef.current = null
       const t = ctx.currentTime
       master.gain.cancelScheduledValues(t)
       master.gain.setValueAtTime(master.gain.value, t)
-      master.gain.linearRampToValueAtTime(0, t + 0.15)
-      earth.osc.stop(t + 0.2)
-      dom.osc.stop(t + 0.2)
-      window.setTimeout(() => void ctx.close(), 300)
+      master.gain.linearRampToValueAtTime(0, t + 0.25)
+      for (const o of stops) o.stop(t + 0.3)
+      window.setTimeout(() => void ctx.close(), 400)
     }
   }, [audioOn])
 
@@ -185,7 +219,7 @@ function App() {
     for (const g of [a.earthGain, a.domGain]) {
       g.gain.cancelScheduledValues(t)
       g.gain.setValueAtTime(g.gain.value, t)
-      g.gain.linearRampToValueAtTime(target, t + 0.18)
+      g.gain.setTargetAtTime(target, t, 0.35)
     }
   }, [windowOpen, audioOn])
 
