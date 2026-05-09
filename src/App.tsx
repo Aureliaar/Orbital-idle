@@ -6,13 +6,31 @@ const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
 const WINDOW_THRESHOLD_RAD = 0.18
 const PROBE_DURATION_S = 1.0
 
+// Orbital frequencies are sub-audible (0.125 Hz, 0.1875 Hz). Multiply by a
+// constant to land Earth on A3 (220 Hz); the 3:2 ratio carries the dominant
+// to E4 (330 Hz).
+const AUDIO_TRANSPOSE = 220 / (1 / EARTH_PERIOD_S)
+const EARTH_HZ = (1 / EARTH_PERIOD_S) * AUDIO_TRANSPOSE
+const DOMINANT_HZ = (1 / DOMINANT_PERIOD_S) * AUDIO_TRANSPOSE
+const DRONE_GAIN = 0.04
+const WINDOW_GAIN = 0.12
+
 type Probe = { startMs: number; angle: number }
+
+type AudioGraph = {
+  ctx: AudioContext
+  master: GainNode
+  earthGain: GainNode
+  domGain: GainNode
+}
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [windowOpen, setWindowOpen] = useState(false)
+  const [audioOn, setAudioOn] = useState(false)
   const probeRef = useRef<Probe | null>(null)
   const domAngleRef = useRef(0)
+  const audioRef = useRef<AudioGraph | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -120,6 +138,57 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  useEffect(() => {
+    if (!audioOn) return
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctor) return
+    const ctx = new Ctor()
+    void ctx.resume()
+
+    const master = ctx.createGain()
+    master.gain.value = 0
+    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.4)
+    master.connect(ctx.destination)
+
+    const make = (hz: number) => {
+      const osc = ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.value = hz
+      const g = ctx.createGain()
+      g.gain.value = DRONE_GAIN
+      osc.connect(g).connect(master)
+      osc.start()
+      return { osc, g }
+    }
+
+    const earth = make(EARTH_HZ)
+    const dom = make(DOMINANT_HZ)
+    audioRef.current = { ctx, master, earthGain: earth.g, domGain: dom.g }
+
+    return () => {
+      audioRef.current = null
+      const t = ctx.currentTime
+      master.gain.cancelScheduledValues(t)
+      master.gain.setValueAtTime(master.gain.value, t)
+      master.gain.linearRampToValueAtTime(0, t + 0.15)
+      earth.osc.stop(t + 0.2)
+      dom.osc.stop(t + 0.2)
+      window.setTimeout(() => void ctx.close(), 300)
+    }
+  }, [audioOn])
+
+  useEffect(() => {
+    const a = audioRef.current
+    if (!a) return
+    const target = windowOpen ? WINDOW_GAIN : DRONE_GAIN
+    const t = a.ctx.currentTime
+    for (const g of [a.earthGain, a.domGain]) {
+      g.gain.cancelScheduledValues(t)
+      g.gain.setValueAtTime(g.gain.value, t)
+      g.gain.linearRampToValueAtTime(target, t + 0.18)
+    }
+  }, [windowOpen, audioOn])
+
   const onLaunch = () => {
     if (!windowOpen || probeRef.current) return
     probeRef.current = { startMs: performance.now(), angle: domAngleRef.current }
@@ -130,17 +199,38 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">Earth · Dominant — 3:2 resonance</p>
       <canvas ref={canvasRef} className="orbit" aria-label="Two bodies in 3:2 resonance" />
-      <button
-        type="button"
-        className={`launch${windowOpen ? ' armed' : ''}`}
-        onClick={onLaunch}
-        disabled={!windowOpen}
-        aria-label="Launch transfer to outer orbit"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3 L19 19 L12 15 L5 19 Z" fill="currentColor" />
-        </svg>
-      </button>
+      <div className="controls">
+        <button
+          type="button"
+          className={`sound${audioOn ? ' on' : ''}`}
+          onClick={() => setAudioOn((v) => !v)}
+          aria-pressed={audioOn}
+          aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
+            {audioOn ? (
+              <>
+                <path d="M16 9 Q18 12 16 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M18 7 Q21 12 18 17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </>
+            ) : (
+              <path d="M16 9 L21 14 M21 9 L16 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            )}
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={`launch${windowOpen ? ' armed' : ''}`}
+          onClick={onLaunch}
+          disabled={!windowOpen}
+          aria-label="Launch transfer to outer orbit"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 L19 19 L12 15 L5 19 Z" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
     </main>
   )
 }
