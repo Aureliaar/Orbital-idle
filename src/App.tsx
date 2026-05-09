@@ -115,7 +115,12 @@ function App() {
         const target = positions.find((p) => p.body.id === id)
         if (!target) return
         const r = earthPos.r + (target.r - earthPos.r) * u
-        const angle = earthAngle + (target.angle - earthAngle) * u
+        // Wrap to shortest signed arc so the probe sweeps with the orbit (CW),
+        // not backward across accumulated revolutions.
+        let delta = (target.angle - earthAngle) % (2 * Math.PI)
+        if (delta > Math.PI) delta -= 2 * Math.PI
+        if (delta < -Math.PI) delta += 2 * Math.PI
+        const angle = earthAngle + delta * u
         const px = cx + Math.cos(angle) * r
         const py = cy + Math.sin(angle) * r
         ctx.fillStyle = accent
