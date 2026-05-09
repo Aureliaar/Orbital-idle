@@ -28,22 +28,42 @@ main h1 {
   margin: 12px auto 4px;
 }
 
-.pill {
-  display: inline-block;
-  padding: 6px 14px;
-  border-radius: 999px;
+.launch {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   border: 1px solid var(--border);
   background: transparent;
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
   color: var(--text);
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
-.pill.open {
+.launch:disabled {
+  opacity: 0.55;
+}
+
+.launch.armed {
   border-color: var(--accent-border);
   background: var(--accent-bg);
   color: var(--accent);
+  cursor: pointer;
+}
+
+.launch.armed:hover {
+  transform: scale(1.05);
+}
+
+.launch.armed:active {
+  transform: scale(0.95);
+}
+
+.launch svg {
+  display: block;
+  width: 22px;
+  height: 22px;
 }

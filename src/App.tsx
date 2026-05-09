@@ -3,11 +3,16 @@ import './App.css'
 
 const EARTH_PERIOD_S = 8
 const DOMINANT_PERIOD_S = (EARTH_PERIOD_S * 2) / 3
-const WINDOW_THRESHOLD_RAD = 0.08
+const WINDOW_THRESHOLD_RAD = 0.18
+const PROBE_DURATION_S = 1.0
+
+type Probe = { startMs: number; angle: number }
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [windowOpen, setWindowOpen] = useState(false)
+  const probeRef = useRef<Probe | null>(null)
+  const domAngleRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -37,6 +42,7 @@ function App() {
 
       const earthAngle = (t / EARTH_PERIOD_S) * 2 * Math.PI
       const domAngle = (t / DOMINANT_PERIOD_S) * 2 * Math.PI
+      domAngleRef.current = domAngle
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
@@ -90,6 +96,22 @@ function App() {
       ctx.arc(dx, dy, 6, 0, 2 * Math.PI)
       ctx.fill()
 
+      const probe = probeRef.current
+      if (probe) {
+        const u = (now - probe.startMs) / 1000 / PROBE_DURATION_S
+        if (u >= 1) {
+          probeRef.current = null
+        } else {
+          const r = rInner + (rOuter - rInner) * u
+          const px = cx + Math.cos(probe.angle) * r
+          const py = cy + Math.sin(probe.angle) * r
+          ctx.fillStyle = accent
+          ctx.beginPath()
+          ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
+          ctx.fill()
+        }
+      }
+
       setWindowOpen((prev) => (prev === open ? prev : open))
       raf = requestAnimationFrame(draw)
     }
@@ -98,14 +120,27 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  const onLaunch = () => {
+    if (!windowOpen || probeRef.current) return
+    probeRef.current = { startMs: performance.now(), angle: domAngleRef.current }
+  }
+
   return (
     <main>
       <h1>Orbital</h1>
       <p className="tagline">Earth · Dominant — 3:2 resonance</p>
       <canvas ref={canvasRef} className="orbit" aria-label="Two bodies in 3:2 resonance" />
-      <div className={`pill ${windowOpen ? 'open' : ''}`}>
-        {windowOpen ? 'launch window' : 'waiting'}
-      </div>
+      <button
+        type="button"
+        className={`launch${windowOpen ? ' armed' : ''}`}
+        onClick={onLaunch}
+        disabled={!windowOpen}
+        aria-label="Launch transfer to outer orbit"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 L19 19 L12 15 L5 19 Z" fill="currentColor" />
+        </svg>
+      </button>
     </main>
   )
 }
