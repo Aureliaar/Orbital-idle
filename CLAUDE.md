@@ -15,7 +15,10 @@ Run `npm run build` and `npm run lint` before claiming a change works. The visua
 
 - Default branch is **`Main`** (capital M), not `main`. `.github/workflows/deploy.yml` triggers on `Main` to match. Git refs are case-sensitive — if you ever rename the branch, update the trigger too.
 - Live site: https://aureliaar.github.io/Orbital-idle/
-- Cloudflare also deploys this repo as a static-assets Worker (config in `wrangler.jsonc`). Production lands at `orbital.jacopo-sinigaglia.workers.dev`; every other branch push creates a preview *version* (Worker Versions) with its own URL of the form `<version-id-prefix>-orbital.jacopo-sinigaglia.workers.dev` — the prefix is the 8-char id shown in Cloudflare dash → Workers & Pages → orbital → Deployments → Version History. Tap the row to copy the exact URL. The production URL only updates when the configured production branch gets a push and `wrangler deploy` runs.
+- Cloudflare also deploys this repo as a static-assets Worker (config in `wrangler.jsonc`). Production lands at `orbital.jacopo-sinigaglia.workers.dev` and only updates when the configured production branch gets a push (build runs `wrangler deploy`). Every other branch push creates a preview Worker Version with two URLs under the `*-orbital.jacopo-sinigaglia.workers.dev` wildcard:
+  - **Version URL** — `<8-char-version-id>-orbital.jacopo-sinigaglia.workers.dev`. Pinned to that exact build forever; old versions keep working.
+  - **Branch alias** — `<sanitized-branch-name>-orbital.jacopo-sinigaglia.workers.dev` (slashes → dashes, lowercased). Auto-updates to the latest build of that branch. Use this for sharing previews — it survives across pushes.
+  - Both are shown in Cloudflare dash → Workers & Pages → orbital → Deployments → Version History → tap a row.
 - `vite.config.ts` switches `base` between `/Orbital-idle/` (GitHub Actions) and `/` (everywhere else) so both hosts resolve assets correctly. If you ever drop one host, simplify the base.
 
 ## Stack
