@@ -34,6 +34,7 @@ type AudioGraph = {
   master: GainNode
   voices: Map<BodyId, GainNode>
   stops: OscillatorNode[]
+  audioEl: HTMLAudioElement | null
 }
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
@@ -250,13 +251,19 @@ function App() {
   // previous shape of this code) leaves the context suspended on iPhone and no sound
   // plays. Build the whole graph inside the click handler instead.
   const stopAudio = useCallback((graph: AudioGraph) => {
-    const { ctx, master, stops } = graph
+    const { ctx, master, stops, audioEl } = graph
     const tnow = ctx.currentTime
     master.gain.cancelScheduledValues(tnow)
     master.gain.setValueAtTime(master.gain.value, tnow)
     master.gain.linearRampToValueAtTime(0, tnow + 0.3)
     for (const o of stops) o.stop(tnow + 0.35)
-    window.setTimeout(() => void ctx.close(), 450)
+    window.setTimeout(() => {
+      if (audioEl) {
+        audioEl.pause()
+        audioEl.srcObject = null
+      }
+      void ctx.close()
+    }, 450)
   }, [])
 
   const handleSoundToggle = useCallback(() => {
@@ -288,7 +295,26 @@ function App() {
     filter.type = 'lowpass'
     filter.frequency.value = 1500
     filter.Q.value = 0.5
-    filter.connect(master).connect(ctx.destination)
+    filter.connect(master)
+
+    // iOS routes raw WebAudio through the "ambient" audio session category,
+    // which the silent/ringer switch mutes. Routing master → MediaStream →
+    // <audio playsinline> uses the "playback" category instead, so the drone
+    // plays even with silent mode on. Falls back to ctx.destination if the
+    // browser doesn't support MediaStream output.
+    let audioEl: HTMLAudioElement | null
+    try {
+      const streamDest = ctx.createMediaStreamDestination()
+      master.connect(streamDest)
+      audioEl = document.createElement('audio')
+      audioEl.setAttribute('playsinline', '')
+      audioEl.autoplay = true
+      audioEl.srcObject = streamDest.stream
+      void audioEl.play()
+    } catch {
+      audioEl = null
+      master.connect(ctx.destination)
+    }
 
     const stops: OscillatorNode[] = []
     const buildVoice = (hz: number, pan: number, baseGain: number, lfoHz: number) => {
@@ -339,7 +365,7 @@ function App() {
       voices.set(body.id, buildVoice(hz, pan, base, lfoHz))
     })
 
-    audioRef.current = { ctx, master, voices, stops }
+    audioRef.current = { ctx, master, voices, stops, audioEl }
     setAudioOn(true)
   }, [stopAudio])
 
