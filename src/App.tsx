@@ -180,8 +180,9 @@ function App() {
 
       const a = audioRef.current
       const phases = phaseRef.current
+      const audioReady = !!a && a.ctx.state === 'running'
       const strike = (voice: ToneVoice, velocity: number) => {
-        if (!a) return
+        if (!audioReady) return
         const v = Math.max(0, Math.min(1, velocity))
         if (v < 0.001) return
         voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
@@ -193,11 +194,11 @@ function App() {
         if (last === undefined) continue
         const wrapped = phase < last
         if (!wrapped) continue
-        if (!a) continue
+        if (!audioReady) continue
         if (body.id === EARTH.id) {
-          strike(a.earth, EARTH_VELOCITY)
+          strike(a!.earth, EARTH_VELOCITY)
         } else {
-          const voice = a.voices.get(body.id)
+          const voice = a!.voices.get(body.id)
           if (!voice) continue
           const s = swells.get(body.id)
           const norm = s
@@ -427,9 +428,17 @@ function App() {
     }
     if (graph.ctx.state !== 'running') {
       unlock = () => {
-        void graph.ctx.resume()
-        primePhases()
         removeUnlock()
+        graph.ctx
+          .resume()
+          .then(() => {
+            // Prime AFTER resume completes so the strike gate (ctx.state === 'running')
+            // sees the primed phases on the very next frame and fires the tonic chord.
+            // Priming synchronously here would race the resume promise and the prime
+            // would be overwritten by the next frame before audio is ready.
+            primePhases()
+          })
+          .catch(() => {})
       }
       window.addEventListener('pointerdown', unlock)
       window.addEventListener('keydown', unlock)
