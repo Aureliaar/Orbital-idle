@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AMSynth, Context, FMSynth, Gain, Panner, PluckSynth, setContext } from 'tone'
 import './App.css'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
@@ -13,11 +14,10 @@ const HALO_PROXIMITY = 0.93
 // audible pitches: D3, E3, F3, G3, A3, B3.
 const EARTH_HZ = 261.63 / 2
 
-// Earth is the constant tonic drone. Each non-tonic voice peak-and-holds:
-// gain climbs toward a proximity-driven target with a slow attack, sighs
-// back if the window passes without a launch, and resolves sharply when
-// the player taps that body's tile.
-const EARTH_DRONE_GAIN = 0.025
+// Each body strikes once per orbital period. The "swell" envelope from the
+// proximity logic is sampled at strike time and becomes the note's velocity:
+// distant bodies tick quietly, alignments crescendo, a launch resolves and
+// drops the body back to a floor velocity.
 const VOICE_FLOOR_GAIN = 0.002
 const VOICE_PEAK_GAIN = 0.16
 const SWELL_ATTACK_TAU = 1.8
@@ -26,15 +26,56 @@ const SWELL_RELEASE_TAU = 0.55
 const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
 const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
 
+const STRIKE_FLOOR_VELOCITY = 0.08
+const EARTH_VELOCITY = 0.55
+const STRIKE_DURATION = '8n'
+
+const TIMBRES = ['pluck', 'piano', 'synth'] as const
+type Timbre = (typeof TIMBRES)[number]
+const TIMBRE_LABELS: Record<Timbre, string> = {
+  pluck: 'Pluck',
+  piano: 'Piano',
+  synth: 'Synth',
+}
+
 type Probe = { startMs: number }
 type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
+type ToneVoice = {
+  synth: PluckSynth | FMSynth | AMSynth
+  panner: Panner
+  freq: number
+}
 type AudioGraph = {
   ctx: AudioContext
-  master: GainNode
-  voices: Map<BodyId, GainNode>
-  stops: OscillatorNode[]
+  master: Gain
+  voices: Map<BodyId, ToneVoice>
+  earth: ToneVoice
   audioEl: HTMLAudioElement | null
+  timbre: Timbre
+}
+
+const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
+  if (timbre === 'pluck') {
+    return new PluckSynth({ attackNoise: 1, dampening: 4000, resonance: 0.92, release: 1 })
+  }
+  if (timbre === 'piano') {
+    return new FMSynth({
+      harmonicity: 2,
+      modulationIndex: 6,
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.003, decay: 1.6, sustain: 0, release: 0.6 },
+      modulation: { type: 'sine' },
+      modulationEnvelope: { attack: 0.003, decay: 0.5, sustain: 0, release: 0.4 },
+    })
+  }
+  return new AMSynth({
+    harmonicity: 2.5,
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.01, decay: 0.8, sustain: 0.05, release: 0.6 },
+    modulation: { type: 'square' },
+    modulationEnvelope: { attack: 0.05, decay: 0.4, sustain: 0, release: 0.3 },
+  })
 }
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
@@ -47,11 +88,13 @@ function App() {
   const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
   const [audioOn, setAudioOn] = useState(false)
+  const [timbre, setTimbre] = useState<Timbre>('pluck')
   const audioRef = useRef<AudioGraph | null>(null)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
   const launchRequestRef = useRef<BodyId | null>(null)
+  const phaseRef = useRef<Map<BodyId, number>>(new Map())
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -133,12 +176,32 @@ function App() {
       }
 
       const a = audioRef.current
-      if (a) {
-        const tnow = a.ctx.currentTime
-        for (const [id, voice] of a.voices) {
-          const s = swells.get(id)
-          if (!s) continue
-          voice.gain.setTargetAtTime(s.held, tnow, 0.04)
+      const phases = phaseRef.current
+      const strike = (voice: ToneVoice, velocity: number) => {
+        if (!a) return
+        const v = Math.max(0, Math.min(1, velocity))
+        if (v < 0.001) return
+        voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
+      }
+      for (const { body } of positions) {
+        const phase = (t / periodOf(body)) % 1
+        const last = phases.get(body.id)
+        phases.set(body.id, phase)
+        if (last === undefined) continue
+        const wrapped = phase < last
+        if (!wrapped) continue
+        if (!a) continue
+        if (body.id === EARTH.id) {
+          strike(a.earth, EARTH_VELOCITY)
+        } else {
+          const voice = a.voices.get(body.id)
+          if (!voice) continue
+          const s = swells.get(body.id)
+          const norm = s
+            ? (s.held - VOICE_FLOOR_GAIN) / (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN)
+            : 0
+          const velocity = STRIKE_FLOOR_VELOCITY + Math.pow(Math.max(0, norm), 0.7) * (1 - STRIKE_FLOOR_VELOCITY)
+          strike(voice, velocity)
         }
       }
 
@@ -251,13 +314,16 @@ function App() {
   // previous shape of this code) leaves the context suspended on iPhone and no sound
   // plays. Build the whole graph inside the click handler instead.
   const stopAudio = useCallback((graph: AudioGraph) => {
-    const { ctx, master, stops, audioEl } = graph
-    const tnow = ctx.currentTime
-    master.gain.cancelScheduledValues(tnow)
-    master.gain.setValueAtTime(master.gain.value, tnow)
-    master.gain.linearRampToValueAtTime(0, tnow + 0.3)
-    for (const o of stops) o.stop(tnow + 0.35)
+    const { ctx, master, voices, earth, audioEl } = graph
+    master.gain.rampTo(0, 0.3)
     window.setTimeout(() => {
+      for (const v of voices.values()) {
+        v.synth.dispose()
+        v.panner.dispose()
+      }
+      earth.synth.dispose()
+      earth.panner.dispose()
+      master.dispose()
       if (audioEl) {
         audioEl.pause()
         audioEl.srcObject = null
@@ -266,19 +332,11 @@ function App() {
     }, 450)
   }, [])
 
-  const handleSoundToggle = useCallback(() => {
-    const existing = audioRef.current
-    if (existing) {
-      audioRef.current = null
-      stopAudio(existing)
-      setAudioOn(false)
-      return
-    }
-
+  const buildAudio = useCallback((nextTimbre: Timbre): AudioGraph | null => {
     const Ctor =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctor) return
+    if (!Ctor) return null
     const ctx = new Ctor()
     void ctx.resume()
     // 1-sample silent buffer: legacy iOS unlock so subsequent oscillator output is audible.
@@ -287,15 +345,10 @@ function App() {
     unlock.connect(ctx.destination)
     unlock.start(0)
 
-    const master = ctx.createGain()
-    master.gain.value = 0
-    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.6)
+    setContext(new Context({ context: ctx }))
 
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.value = 1500
-    filter.Q.value = 0.5
-    filter.connect(master)
+    const master = new Gain(0)
+    master.gain.rampTo(1, 0.6)
 
     // iOS routes raw WebAudio through the "ambient" audio session category,
     // which the silent/ringer switch mutes. Routing master → MediaStream →
@@ -316,58 +369,65 @@ function App() {
       master.connect(ctx.destination)
     }
 
-    const stops: OscillatorNode[] = []
-    const buildVoice = (hz: number, pan: number, baseGain: number, lfoHz: number) => {
-      const voice = ctx.createGain()
-      voice.gain.value = baseGain
-      const panner = ctx.createStereoPanner()
-      panner.pan.value = pan
-      voice.connect(panner).connect(filter)
-
-      const fund = ctx.createOscillator()
-      fund.type = 'sine'
-      fund.frequency.value = hz
-      const fg = ctx.createGain()
-      fg.gain.value = 1
-      fund.connect(fg).connect(voice)
-
-      const harm = ctx.createOscillator()
-      harm.type = 'sine'
-      harm.frequency.value = hz * 2
-      const hg = ctx.createGain()
-      hg.gain.value = 0.18
-      harm.connect(hg).connect(voice)
-
-      const lfo = ctx.createOscillator()
-      lfo.frequency.value = lfoHz
-      const ld = ctx.createGain()
-      ld.gain.value = hz * 0.0025
-      lfo.connect(ld)
-      ld.connect(fund.frequency)
-      ld.connect(harm.frequency)
-
-      fund.start()
-      harm.start()
-      lfo.start()
-      stops.push(fund, harm, lfo)
-      return voice
+    const buildVoice = (hz: number, pan: number): ToneVoice => {
+      const synth = buildSynth(nextTimbre)
+      const panner = new Panner(pan)
+      synth.connect(panner)
+      panner.connect(master)
+      return { synth, panner, freq: hz }
     }
 
-    buildVoice(EARTH_HZ, 0, EARTH_DRONE_GAIN, 0.17)
-
-    const voices = new Map<BodyId, GainNode>()
+    const earth = buildVoice(EARTH_HZ, 0)
+    const voices = new Map<BodyId, ToneVoice>()
     TARGETS.forEach((body, i) => {
       const pan = -0.4 + (i / Math.max(1, TARGETS.length - 1)) * 0.8
-      const lfoHz = 0.16 + i * 0.015
       const hz = EARTH_HZ * body.ratio
-      const swell = swellsRef.current.get(body.id)
-      const base = swell ? swell.held : VOICE_FLOOR_GAIN
-      voices.set(body.id, buildVoice(hz, pan, base, lfoHz))
+      voices.set(body.id, buildVoice(hz, pan))
     })
 
-    audioRef.current = { ctx, master, voices, stops, audioEl }
+    return { ctx, master, voices, earth, audioEl, timbre: nextTimbre }
+  }, [])
+
+  const handleSoundToggle = useCallback(() => {
+    const existing = audioRef.current
+    if (existing) {
+      audioRef.current = null
+      stopAudio(existing)
+      setAudioOn(false)
+      return
+    }
+    const graph = buildAudio(timbre)
+    if (!graph) return
+    // Prime phases just below 1 so the next frame detects a wrap and every body
+    // strikes a tonic chord immediately on enable, rather than waiting up to a
+    // full period for its first natural wraparound.
+    phaseRef.current.clear()
+    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
+    audioRef.current = graph
     setAudioOn(true)
-  }, [stopAudio])
+  }, [buildAudio, stopAudio, timbre])
+
+  const handleTimbreChange = useCallback(
+    (next: Timbre) => {
+      setTimbre(next)
+      const existing = audioRef.current
+      if (!existing) return
+      audioRef.current = null
+      stopAudio(existing)
+      const graph = buildAudio(next)
+      if (!graph) {
+        setAudioOn(false)
+        return
+      }
+      // Prime phases just below 1 so the next frame detects a wrap and every body
+    // strikes a tonic chord immediately on enable, rather than waiting up to a
+    // full period for its first natural wraparound.
+    phaseRef.current.clear()
+    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
+      audioRef.current = graph
+    },
+    [buildAudio, stopAudio],
+  )
 
   useEffect(() => {
     return () => {
@@ -414,6 +474,20 @@ function App() {
             )}
           </svg>
         </button>
+        <div className="timbres" role="radiogroup" aria-label="Timbre">
+          {TIMBRES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="radio"
+              aria-checked={timbre === t}
+              className={`timbre${timbre === t ? ' on' : ''}`}
+              onClick={() => handleTimbreChange(t)}
+            >
+              {TIMBRE_LABELS[t]}
+            </button>
+          ))}
+        </div>
       </div>
       <canvas
         ref={canvasRef}
