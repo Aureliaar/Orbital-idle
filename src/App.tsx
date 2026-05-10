@@ -87,8 +87,11 @@ function App() {
   const [armed, setArmed] = useState<ArmedMap>({})
   const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
-  const [audioOn, setAudioOn] = useState(false)
-  const [timbre, setTimbre] = useState<Timbre>('pluck')
+  const [audioOn, setAudioOn] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return !!(window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+  })
+  const [timbre, setTimbre] = useState<Timbre>('piano')
   const audioRef = useRef<AudioGraph | null>(null)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
@@ -133,11 +136,11 @@ function App() {
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
 
-      const earthAngle = (t / EARTH_PERIOD_S) * 2 * Math.PI
+      const earthAngle = ((t / EARTH_PERIOD_S) + EARTH.phase) * 2 * Math.PI
 
       const positions = ORBITS.map((body, i) => {
         const r = rMin + (rMax - rMin) * (i / (ORBITS.length - 1))
-        const angle = (t / periodOf(body)) * 2 * Math.PI
+        const angle = ((t / periodOf(body)) + body.phase) * 2 * Math.PI
         let delta = Math.abs(((earthAngle - angle) % (2 * Math.PI)))
         if (delta > Math.PI) delta = 2 * Math.PI - delta
         return { body, angle, r, delta }
@@ -184,7 +187,7 @@ function App() {
         voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
       }
       for (const { body } of positions) {
-        const phase = (t / periodOf(body)) % 1
+        const phase = ((t / periodOf(body)) + body.phase) % 1
         const last = phases.get(body.id)
         phases.set(body.id, phase)
         if (last === undefined) continue
@@ -389,54 +392,57 @@ function App() {
   }, [])
 
   const handleSoundToggle = useCallback(() => {
-    const existing = audioRef.current
-    if (existing) {
-      audioRef.current = null
-      stopAudio(existing)
-      setAudioOn(false)
-      return
-    }
+    setAudioOn((on) => !on)
+  }, [])
+
+  const handleTimbreChange = useCallback((next: Timbre) => {
+    setTimbre(next)
+  }, [])
+
+  // Prime phases just below 1 so the next frame detects a wrap and every body
+  // strikes a tonic chord immediately, rather than waiting up to a full period
+  // for its first natural wraparound.
+  const primePhases = useCallback(() => {
+    phaseRef.current.clear()
+    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
+  }, [])
+
+  // Build / tear down the audio graph from state. Default-on means we attempt
+  // to construct it at mount; autoplay-blocking browsers leave the context
+  // suspended, so we also resume on the first user gesture and re-prime the
+  // strike phases so the very first audible frame fires the tonic chord.
+  useEffect(() => {
+    if (!audioOn) return
     const graph = buildAudio(timbre)
     if (!graph) return
-    // Prime phases just below 1 so the next frame detects a wrap and every body
-    // strikes a tonic chord immediately on enable, rather than waiting up to a
-    // full period for its first natural wraparound.
-    phaseRef.current.clear()
-    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
     audioRef.current = graph
-    setAudioOn(true)
-  }, [buildAudio, stopAudio, timbre])
+    primePhases()
 
-  const handleTimbreChange = useCallback(
-    (next: Timbre) => {
-      setTimbre(next)
-      const existing = audioRef.current
-      if (!existing) return
-      audioRef.current = null
-      stopAudio(existing)
-      const graph = buildAudio(next)
-      if (!graph) {
-        setAudioOn(false)
-        return
-      }
-      // Prime phases just below 1 so the next frame detects a wrap and every body
-    // strikes a tonic chord immediately on enable, rather than waiting up to a
-    // full period for its first natural wraparound.
-    phaseRef.current.clear()
-    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
-      audioRef.current = graph
-    },
-    [buildAudio, stopAudio],
-  )
-
-  useEffect(() => {
-    return () => {
-      const graph = audioRef.current
-      if (!graph) return
-      audioRef.current = null
-      stopAudio(graph)
+    let unlock: (() => void) | null = null
+    const removeUnlock = () => {
+      if (!unlock) return
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+      unlock = null
     }
-  }, [stopAudio])
+    if (graph.ctx.state !== 'running') {
+      unlock = () => {
+        void graph.ctx.resume()
+        primePhases()
+        removeUnlock()
+      }
+      window.addEventListener('pointerdown', unlock)
+      window.addEventListener('keydown', unlock)
+    }
+
+    return () => {
+      removeUnlock()
+      if (audioRef.current === graph) {
+        audioRef.current = null
+        stopAudio(graph)
+      }
+    }
+  }, [audioOn, timbre, buildAudio, stopAudio, primePhases])
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
