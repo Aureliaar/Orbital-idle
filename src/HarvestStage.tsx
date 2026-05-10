@@ -4,13 +4,14 @@ import type { AudioGraph } from './audio'
 import { BODIES, ratioLabel as toRatioLabel } from './bodies'
 import type { BodyId } from './bodies'
 import {
+  AUTO_PLUCK_PENALTY,
   COINCIDENCE_TOL,
   HARMONIC_COUNT,
+  MAX_SLOT_COUNT,
   PAD_COLORS,
   RESONANCE_GAIN,
   RING_DURATION_MS,
   RING_DURATION_S,
-  SLOT_COUNT,
   TONE_PER_TAP,
   TONIC_HZ,
 } from './harvest-config'
@@ -26,7 +27,7 @@ const PLUCK_HIT_BOOST = 2.2
 
 const BURST_MS = 600
 
-const SLOT_KEYS = ['a', 's']
+const SLOT_KEYS = ['a', 's', 'd', 'f']
 
 // Auto-pluck cadence equals slot cooldown so consecutive auto-plucks land
 // exactly when the slot becomes available again. Slot 2 fires offset by
@@ -40,7 +41,8 @@ type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
 type Props = {
   unlockedIds: readonly BodyId[]
   slots: ReadonlyArray<BodyId | null>
-  autoPluckUnlocked: boolean
+  slotCount: number
+  autoPluckSlots: ReadonlySet<number>
   onSlotChange: (slotIdx: number, noteId: BodyId | null) => void
   onTone: (delta: number) => void
   onResonance: (delta: number) => void
@@ -49,7 +51,8 @@ type Props = {
 export function HarvestStage({
   unlockedIds,
   slots,
-  autoPluckUnlocked,
+  slotCount,
+  autoPluckSlots,
   onSlotChange,
   onTone,
   onResonance,
@@ -63,6 +66,7 @@ export function HarvestStage({
   const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
   const [openPickerIdx, setOpenPickerIdx] = useState<number | null>(null)
   const slotsRef = useRef(slots)
+  const autoSlotsRef = useRef(autoPluckSlots)
   const onToneRef = useRef(onTone)
   const onResonanceRef = useRef(onResonance)
 
@@ -75,6 +79,9 @@ export function HarvestStage({
   useEffect(() => {
     slotsRef.current = slots
   }, [slots])
+  useEffect(() => {
+    autoSlotsRef.current = autoPluckSlots
+  }, [autoPluckSlots])
 
   // rAF: decay cloud + bursts, redraw spectrum strip.
   useEffect(() => {
@@ -222,7 +229,7 @@ export function HarvestStage({
         ctx2d.textAlign = 'center'
         ctx2d.textBaseline = 'middle'
         ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('tap a slot (A / S) to play', cssW / 2, cssH / 2)
+        ctx2d.fillText('tap a slot to play', cssW / 2, cssH / 2)
         ctx2d.globalAlpha = 1
       }
 
@@ -246,8 +253,10 @@ export function HarvestStage({
 
   // Core slot trigger — manual taps, keyboard, and auto-pluck all route
   // through here so the cooldown / coincidence / audio / cloud paths stay
-  // identical regardless of who fired.
-  const handleSlot = useCallback((slotIdx: number, opts?: { silent?: boolean }) => {
+  // identical regardless of who fired. Auto-fired plucks pay a yield
+  // penalty (AUTO_PLUCK_PENALTY) on Tone + Resonance so manual play is
+  // strictly better when the player is at the keyboard.
+  const handleSlot = useCallback((slotIdx: number, opts?: { auto?: boolean }) => {
     const slotsNow = slotsRef.current
     const noteId = slotsNow[slotIdx]
     if (!noteId) return
@@ -274,9 +283,10 @@ export function HarvestStage({
       gain: RESONANCE_GAIN,
     })
 
-    onToneRef.current(TONE_PER_TAP)
+    const yieldMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
+    onToneRef.current(TONE_PER_TAP * yieldMul)
     if (total > 0) {
-      onResonanceRef.current(total)
+      onResonanceRef.current(total * yieldMul)
       for (const h of hits) {
         burstsRef.current.push({
           id: nextBurstIdRef.current++,
@@ -291,12 +301,12 @@ export function HarvestStage({
     // user gesture. Auto-plucks before the first manual tap stay silent
     // (visuals + score still tick) — iOS Safari requires .resume() to come
     // synchronously from a real gesture, so we never try here.
-    if (!opts?.silent && !audioRef.current) {
+    if (!opts?.auto && !audioRef.current) {
       const g = createAudioGraph({ lowpassHz: 4000, fadeInS: 0.05 })
       if (g) audioRef.current = g
     }
     const audio = audioRef.current
-    if (audio && !opts?.silent) playPluck(audio, incoming, hits)
+    if (audio) playPluck(audio, incoming, hits)
 
     for (const ih of incoming) {
       cloud.push({
@@ -310,21 +320,26 @@ export function HarvestStage({
     }
   }, [])
 
-  // Auto-pluck: each slot fires on a fixed cadence, staggered so the two
-  // clouds overlap mid-life. Timers are slot-indexed, never note-indexed —
-  // so swapping a note into a slot doesn't reset the rhythm. Gated behind
-  // the auto-pluck unlock; until purchased, the Resonator is a manual
-  // rhythm game and no timers run.
+  // Auto-pluck timers exist for every potential slot; whether they actually
+  // fire is checked against `autoSlotsRef` at tick time. That way buying
+  // auto-pluck for a new slot doesn't reset the rhythm of the slots that
+  // already had it. Stagger is `i * AUTO_STAGGER_MS` so the clouds overlap
+  // mid-life — that's when their coincidence bonus is biggest.
   useEffect(() => {
-    if (!autoPluckUnlocked) return
     const timers: number[] = []
     const intervalIds: number[] = []
-    for (let i = 0; i < SLOT_COUNT; i++) {
-      const delay = i * AUTO_STAGGER_MS
+    for (let i = 0; i < MAX_SLOT_COUNT; i++) {
+      const slotIdx = i
+      const delay = slotIdx * AUTO_STAGGER_MS
+      const fire = () => {
+        if (autoSlotsRef.current.has(slotIdx)) {
+          handleSlot(slotIdx, { auto: true })
+        }
+      }
       timers.push(
         window.setTimeout(() => {
-          handleSlot(i)
-          intervalIds.push(window.setInterval(() => handleSlot(i), AUTO_CADENCE_MS))
+          fire()
+          intervalIds.push(window.setInterval(fire, AUTO_CADENCE_MS))
         }, delay),
       )
     }
@@ -332,7 +347,7 @@ export function HarvestStage({
       for (const t of timers) window.clearTimeout(t)
       for (const id of intervalIds) window.clearInterval(id)
     }
-  }, [handleSlot, autoPluckUnlocked])
+  }, [handleSlot])
 
   // Keyboard bindings: A → slot 0, S → slot 1.
   useEffect(() => {
@@ -343,13 +358,13 @@ export function HarvestStage({
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       const k = e.key.toLowerCase()
       const idx = SLOT_KEYS.indexOf(k)
-      if (idx === -1 || idx >= SLOT_COUNT) return
+      if (idx === -1 || idx >= slotCount) return
       e.preventDefault()
       handleSlot(idx)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSlot])
+  }, [handleSlot, slotCount])
 
   // Click-outside / Escape closes any open picker.
   useEffect(() => {
@@ -383,24 +398,32 @@ export function HarvestStage({
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
       <ul className="pads" role="list">
-        {Array.from({ length: SLOT_COUNT }, (_, idx) => {
+        {Array.from({ length: slotCount }, (_, idx) => {
           const noteId = slots[idx] ?? null
           const body = noteId ? BODIES.find((b) => b.id === noteId) ?? null : null
           const color = body ? PAD_COLORS[body.id] : 'var(--border)'
           const isCooling = cooling.has(idx)
           const slotKey = SLOT_KEYS[idx]
           const pickerOpen = openPickerIdx === idx
+          const isAuto = autoPluckSlots.has(idx)
+          const onPadClick = () => {
+            if (!body) {
+              setOpenPickerIdx(pickerOpen ? null : idx)
+              return
+            }
+            handleSlot(idx)
+          }
           return (
             <li key={idx} className="slot">
               <button
                 type="button"
-                className={`pad${isCooling ? ' cooling' : ''}${body ? '' : ' empty'}`}
-                onPointerDown={() => handleSlot(idx)}
-                disabled={isCooling || !body}
+                className={`pad${isCooling ? ' cooling' : ''}${body ? '' : ' empty'}${isAuto ? ' auto' : ''}`}
+                onPointerDown={onPadClick}
+                disabled={Boolean(body) && isCooling}
                 aria-label={
                   body
                     ? `Play ${body.id} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
-                    : `Empty slot ${idx + 1}`
+                    : `Empty slot ${idx + 1} — tap to assign a note`
                 }
                 style={{
                   ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
@@ -408,8 +431,20 @@ export function HarvestStage({
                 }}
               >
                 <span className="pad-key" aria-hidden="true">{slotKey?.toUpperCase()}</span>
-                <span className="pad-note">{body ? body.id : '—'}</span>
-                <span className="pad-ratio">{body ? toRatioLabel(body.ratio) : 'empty'}</span>
+                {isAuto && body && (
+                  <span className="pad-auto" aria-label="auto-pluck on" title="Auto-pluck on">⚡</span>
+                )}
+                {body ? (
+                  <>
+                    <span className="pad-note">{body.id}</span>
+                    <span className="pad-ratio">{toRatioLabel(body.ratio)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="pad-note pad-note-empty" aria-hidden="true">+</span>
+                    <span className="pad-ratio">add note</span>
+                  </>
+                )}
                 <span className="pad-cooldown" aria-hidden="true" />
               </button>
               <button
@@ -465,9 +500,9 @@ export function HarvestStage({
         })}
       </ul>
       <p className="harvest-hint">
-        {autoPluckUnlocked
-          ? 'Slots auto-fire on a 1.5 s cadence. Tap (or press A/S) to pluck early. Swap notes via the ▾ — coincident partials pay Resonance.'
-          : 'Tap a slot (or press A/S) to play. Hit the second slot while the first is ringing — coincident partials pay Resonance.'}
+        Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play. Hit
+        another while the first rings — coincident partials pay Resonance.
+        Auto-plucked slots fire themselves at half yield (⚡).
       </p>
     </section>
   )

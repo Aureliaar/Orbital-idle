@@ -573,14 +573,59 @@ main h1 {
   position: relative;
 }
 
+/* Empty pads should READ as empty: dashed accent border that pulses, big
+   "+" instead of a note letter, and the whole pad is clickable as a
+   shortcut to open the picker. */
 .pad.empty {
-  --pad-color: var(--border);
+  --pad-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   border-style: dashed;
+  border-width: 2px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  animation: empty-pulse 2.4s ease-in-out infinite;
+  cursor: pointer;
 }
 
-.pad.empty .pad-note {
-  color: var(--text);
-  opacity: 0.45;
+.pad.empty:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.pad-note-empty {
+  font-size: 2.4rem;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  opacity: 0.85;
+}
+
+.pad.empty .pad-ratio {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
+}
+
+@keyframes empty-pulse {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--accent) 75%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+.pad-auto {
+  position: absolute;
+  top: 6px;
+  right: 32px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--pad-color);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.pad.auto {
+  background: color-mix(in srgb, var(--pad-color) 6%, transparent);
 }
 
 .slot-picker-toggle {
@@ -790,6 +835,11 @@ main h1 {
 .unlock.unlock-auto {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: var(--accent-bg);
+}
+
+.unlock.unlock-slot {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-style: dashed;
   grid-column: 1 / -1;
 }
 

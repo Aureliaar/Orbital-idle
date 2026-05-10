@@ -36,10 +36,16 @@ export const COINCIDENCE_TOL = 0.005
 export const RESONANCE_GAIN = 28
 export const TONE_PER_TAP = 1
 
-// Two assignable slots for v1. Each can hold any unlocked note; the same
-// note can't be in both slots (the picker enforces it). Cooldown is keyed
-// by slot index, not by note.
-export const SLOT_COUNT = 2
+// Up to four assignable slots — start with two and unlock the rest. Each
+// can hold any unlocked note; the same note can't be in two slots (the
+// picker enforces it). Cooldown is keyed by slot index, not by note.
+export const INITIAL_SLOT_COUNT = 2
+export const MAX_SLOT_COUNT = 4
+
+// Auto-pluck is per-slot and carries a yield penalty: an auto-fired tap
+// pays this fraction of what a real tap would. Manual play stays the
+// optimal play, auto-pluck is the convenient one.
+export const AUTO_PLUCK_PENALTY = 0.5
 
 // Diatonic-color mapping (Newton / Boomwhacker tradition).
 export const PAD_COLORS: Record<string, string> = {
@@ -55,21 +61,30 @@ export const PAD_COLORS: Record<string, string> = {
 // Analytic idle rate for a given slot assignment. The on-tab path credits
 // the same numbers via real auto-plucks; this function exists so off-tab
 // accrual matches without running React/canvas.
-export function computeIdleRate(slots: ReadonlyArray<BodyId | null>): {
-  tonePerSec: number
-  resonancePerSec: number
-} {
-  let filled = 0
-  for (const s of slots) if (s) filled++
-  const tonePerSec = (filled * TONE_PER_TAP) / RING_DURATION_S
+//
+// Only slots whose index is in `autoSlots` contribute — manual-only slots
+// don't auto-fire, so they generate no idle income. Pair Resonance is only
+// counted when BOTH slots in the pair are auto-plucked (otherwise the
+// coincidence would require a manual tap that off-tab idle never sees).
+// Both Tone and Resonance are scaled by AUTO_PLUCK_PENALTY since every
+// tick is an auto-fired tap.
+export function computeIdleRate(
+  slots: ReadonlyArray<BodyId | null>,
+  autoSlots: ReadonlySet<number>,
+): { tonePerSec: number; resonancePerSec: number } {
+  let autoFilled = 0
+  for (let i = 0; i < slots.length; i++) {
+    if (autoSlots.has(i) && slots[i]) autoFilled++
+  }
+  const tonePerSec = (autoFilled * TONE_PER_TAP * AUTO_PLUCK_PENALTY) / RING_DURATION_S
 
   let resonancePerSec = 0
-  // For SLOT_COUNT=2 there's at most one pair. The general form sums over
-  // every unordered pair of filled slots — extend here when slot count grows.
   for (let i = 0; i < slots.length; i++) {
+    if (!autoSlots.has(i)) continue
     const a = slots[i]
     if (!a) continue
     for (let j = i + 1; j < slots.length; j++) {
+      if (!autoSlots.has(j)) continue
       const b = slots[j]
       if (!b) continue
       const ba = BODIES.find((x) => x.id === a)
@@ -81,7 +96,7 @@ export function computeIdleRate(slots: ReadonlyArray<BodyId | null>): {
         cadenceS: RING_DURATION_S,
         gain: RESONANCE_GAIN,
         tolFrac: COINCIDENCE_TOL,
-      })
+      }) * AUTO_PLUCK_PENALTY
     }
   }
   return { tonePerSec, resonancePerSec }

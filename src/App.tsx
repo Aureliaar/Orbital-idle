@@ -5,7 +5,7 @@ import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
 import { HarvestStage } from './HarvestStage'
-import { computeIdleRate, SLOT_COUNT } from './harvest-config'
+import { computeIdleRate, INITIAL_SLOT_COUNT, MAX_SLOT_COUNT } from './harvest-config'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
 
@@ -34,12 +34,26 @@ const UNLOCK_COSTS: Record<BodyId, { tone: number; resonance: number }> = {
   B: { tone: 300, resonance: 220 },
 }
 
-// Auto-pluck — the moment the Resonator becomes an idle game. Until the
-// player buys this, every Tone/Resonance gain comes from a real tap.
-// Surfaces only after 3+ notes are unlocked so the player has felt the
-// manual combo loop first.
-const AUTO_PLUCK_COST = { tone: 500, resonance: 350 }
+// Auto-pluck is bought one slot at a time. Surfaces only after 3+ notes
+// are unlocked so the player has felt the manual combo loop first. Each
+// slot's auto-pluck pays half yield (AUTO_PLUCK_PENALTY) — manual play
+// stays the optimal play, auto is the convenient one. Cost roughly 2× per
+// subsequent slot so the second/third/fourth auto-pluck stay aspirational.
+const AUTO_PLUCK_BASE_COST = { tone: 500, resonance: 350 }
 const AUTO_PLUCK_MIN_UNLOCKS = 3
+const autoPluckCost = (slotIdx: number) => ({
+  tone: Math.round(AUTO_PLUCK_BASE_COST.tone * 1.6 ** slotIdx),
+  resonance: Math.round(AUTO_PLUCK_BASE_COST.resonance * 1.6 ** slotIdx),
+})
+
+// Extra slots after the initial two. Slot 3 enables true 3-note resonance
+// (e.g. C+E+A all coincide at freq=5×TONIC, paying 2 pair-bonuses per tap
+// at that partial); slot 4 enables 4-note stacks. Each costs both
+// currencies and unlocks once the previous slot exists.
+const SLOT_UNLOCK_COSTS: Record<number, { tone: number; resonance: number }> = {
+  3: { tone: 80, resonance: 50 },
+  4: { tone: 250, resonance: 180 },
+}
 
 // Two infinite upgrades that compound: each level multiplies its yield by
 // YIELD_STEP, and the cost grows by COST_STEP. With YIELD < COST per level
@@ -100,12 +114,13 @@ function App() {
   const [tone, setTone] = useState(0)
   const [resonance, setResonance] = useState(0)
   const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
+  const [slotCount, setSlotCount] = useState(INITIAL_SLOT_COUNT)
   const [slots, setSlots] = useState<(BodyId | null)[]>(() => {
-    const init: (BodyId | null)[] = Array(SLOT_COUNT).fill(null)
+    const init: (BodyId | null)[] = Array(INITIAL_SLOT_COUNT).fill(null)
     init[0] = 'C'
     return init
   })
-  const [autoPluckUnlocked, setAutoPluckUnlocked] = useState(false)
+  const [autoPluckSlots, setAutoPluckSlots] = useState<ReadonlySet<number>>(() => new Set())
   const [toneYieldLvl, setToneYieldLvl] = useState(0)
   const [resYieldLvl, setResYieldLvl] = useState(0)
 
@@ -388,20 +403,21 @@ function App() {
     }
   }, [stopAudio])
 
-  const baseIdleRate = computeIdleRate(slots)
+  const baseIdleRate = computeIdleRate(slots, autoPluckSlots)
   const idleRate = {
     tonePerSec: baseIdleRate.tonePerSec * toneMul,
     resonancePerSec: baseIdleRate.resonancePerSec * resMul,
   }
+  const anyAutoPluck = autoPluckSlots.size > 0
 
-  // Off-tab idle accrual. Only runs once auto-pluck is unlocked — before
-  // that the Resonator is a manual game and there's no idle to accrue.
-  // On-tab, auto-plucks credit Tone/Resonance directly via the existing
-  // callbacks; running the ticker too would double-count. The on-tap and
-  // off-tab paths share the same yield multipliers so progression stays
-  // consistent across tab switches.
+  // Off-tab idle accrual. Only runs once at least one slot has auto-pluck
+  // — before that the Resonator is a manual game and there's no idle to
+  // accrue. On-tab, auto-plucks credit Tone/Resonance directly via the
+  // existing callbacks; running the ticker too would double-count. The
+  // on-tap and off-tab paths share the same yield multipliers so
+  // progression stays consistent across tab switches.
   useEffect(() => {
-    if (!autoPluckUnlocked) return
+    if (!anyAutoPluck) return
     if (tab === 'harvest') return
     if (idleRate.tonePerSec === 0 && idleRate.resonancePerSec === 0) return
     let last = performance.now()
@@ -413,7 +429,7 @@ function App() {
       if (idleRate.resonancePerSec > 0) setResonance((r) => r + idleRate.resonancePerSec * dt)
     }, 250)
     return () => window.clearInterval(id)
-  }, [tab, autoPluckUnlocked, idleRate.tonePerSec, idleRate.resonancePerSec])
+  }, [tab, anyAutoPluck, idleRate.tonePerSec, idleRate.resonancePerSec])
 
   const handleSlotChange = useCallback((slotIdx: number, noteId: BodyId | null) => {
     setSlots((prev) => {
@@ -440,14 +456,32 @@ function App() {
     setUnlockedIds((prev) => [...prev, id])
   }, [unlockedIds, tone, resonance])
 
-  const handleUnlockAutoPluck = useCallback(() => {
-    if (autoPluckUnlocked) return
+  const handleUnlockAutoPluck = useCallback((slotIdx: number) => {
+    if (autoPluckSlots.has(slotIdx)) return
+    if (slotIdx >= slotCount) return
     if (unlockedIds.length < AUTO_PLUCK_MIN_UNLOCKS) return
-    if (tone < AUTO_PLUCK_COST.tone || resonance < AUTO_PLUCK_COST.resonance) return
-    setTone((t) => t - AUTO_PLUCK_COST.tone)
-    setResonance((r) => r - AUTO_PLUCK_COST.resonance)
-    setAutoPluckUnlocked(true)
-  }, [autoPluckUnlocked, unlockedIds.length, tone, resonance])
+    const cost = autoPluckCost(slotIdx)
+    if (tone < cost.tone || resonance < cost.resonance) return
+    setTone((t) => t - cost.tone)
+    setResonance((r) => r - cost.resonance)
+    setAutoPluckSlots((prev) => {
+      const next = new Set(prev)
+      next.add(slotIdx)
+      return next
+    })
+  }, [autoPluckSlots, slotCount, unlockedIds.length, tone, resonance])
+
+  const handleUnlockSlot = useCallback(() => {
+    const nextIdx = slotCount
+    if (nextIdx >= MAX_SLOT_COUNT) return
+    const cost = SLOT_UNLOCK_COSTS[nextIdx + 1]
+    if (!cost) return
+    if (tone < cost.tone || resonance < cost.resonance) return
+    setTone((t) => t - cost.tone)
+    setResonance((r) => r - cost.resonance)
+    setSlotCount((c) => c + 1)
+    setSlots((prev) => [...prev, null])
+  }, [slotCount, tone, resonance])
 
   const buyToneYield = useCallback(() => {
     const cost = toneYieldCost(toneYieldLvl)
@@ -465,8 +499,15 @@ function App() {
 
   // Next 1–2 ladder steps the player hasn't unlocked yet.
   const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
-  const showAutoPluckUnlock = !autoPluckUnlocked && unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
-  const canAffordAutoPluck = tone >= AUTO_PLUCK_COST.tone && resonance >= AUTO_PLUCK_COST.resonance
+  // Slot unlock card — show once the previous slot exists.
+  const nextSlotIdx = slotCount + 1
+  const nextSlotCost = SLOT_UNLOCK_COSTS[nextSlotIdx]
+  const canAffordSlot = nextSlotCost ? tone >= nextSlotCost.tone && resonance >= nextSlotCost.resonance : false
+  // Auto-pluck cards — one per existing slot that isn't auto-plucked yet.
+  const autoPluckGate = unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
+  const autoPluckSlotsToOffer = autoPluckGate
+    ? Array.from({ length: slotCount }, (_, i) => i).filter((i) => !autoPluckSlots.has(i))
+    : []
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
@@ -567,13 +608,14 @@ function App() {
           <HarvestStage
             unlockedIds={unlockedIds}
             slots={slots}
-            autoPluckUnlocked={autoPluckUnlocked}
+            slotCount={slotCount}
+            autoPluckSlots={autoPluckSlots}
             onSlotChange={handleSlotChange}
             onTone={(d) => setTone((t) => t + d * toneMul)}
             onResonance={(d) => setResonance((r) => r + d * resMul)}
           />
           <section className="resonator-progress" aria-label="Progression">
-            {autoPluckUnlocked && (
+            {anyAutoPluck && (
               <p className="idle-rate">
                 Idle{' '}
                 <span>
@@ -615,7 +657,9 @@ function App() {
                 </button>
               </li>
             </ul>
-            {(nextUnlocks.length > 0 || showAutoPluckUnlock) && (
+            {(nextUnlocks.length > 0 ||
+              nextSlotCost ||
+              autoPluckSlotsToOffer.length > 0) && (
               <ul className="unlocks" role="list">
                 {nextUnlocks.map((id, i) => {
                   const cost = UNLOCK_COSTS[id]
@@ -640,25 +684,50 @@ function App() {
                     </li>
                   )
                 })}
-                {showAutoPluckUnlock && (
-                  <li className="unlock unlock-auto">
+                {nextSlotCost && (
+                  <li className="unlock unlock-slot">
                     <div className="unlock-info">
-                      <span className="unlock-note">Auto-pluck</span>
+                      <span className="unlock-note">Slot {nextSlotIdx}</span>
                       <span className="unlock-cost">
-                        {AUTO_PLUCK_COST.tone} Tone · {AUTO_PLUCK_COST.resonance} Resonance
+                        {nextSlotCost.tone} Tone · {nextSlotCost.resonance} Resonance
                       </span>
-                      <span className="unlock-desc">slots ring on their own</span>
+                      <span className="unlock-desc">
+                        {nextSlotIdx === 3 ? '3-note resonance unlocks' : 'one more pad'}
+                      </span>
                     </div>
                     <button
                       type="button"
                       className="unlock-btn"
-                      disabled={!canAffordAutoPluck}
-                      onClick={handleUnlockAutoPluck}
+                      disabled={!canAffordSlot}
+                      onClick={handleUnlockSlot}
                     >
                       Unlock
                     </button>
                   </li>
                 )}
+                {autoPluckSlotsToOffer.map((slotIdx) => {
+                  const cost = autoPluckCost(slotIdx)
+                  const affordable = tone >= cost.tone && resonance >= cost.resonance
+                  return (
+                    <li key={`auto-${slotIdx}`} className="unlock unlock-auto">
+                      <div className="unlock-info">
+                        <span className="unlock-note">⚡ Auto-pluck slot {slotIdx + 1}</span>
+                        <span className="unlock-cost">
+                          {cost.tone} Tone · {cost.resonance} Resonance
+                        </span>
+                        <span className="unlock-desc">half yield, fires itself</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="unlock-btn"
+                        disabled={!affordable}
+                        onClick={() => handleUnlockAutoPluck(slotIdx)}
+                      >
+                        Unlock
+                      </button>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </section>
