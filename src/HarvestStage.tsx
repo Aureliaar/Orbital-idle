@@ -44,17 +44,31 @@ type Pad = {
   label: string
   ratio: number
   ratioLabel: string
+  color: string
   // Keyboard binding (lowercase, single key). Pads beyond ASDF will need
   // more keys in PAD_KEYS once the unlock ladder ships.
   key: string
+}
+
+// Diatonic-color mapping (Newton / Boomwhacker tradition). Reserved up-front
+// for all seven unlock-ladder pads so cloud partials can be colored by
+// noteId regardless of which pads have shipped yet.
+const PAD_COLORS: Record<string, string> = {
+  C: '#dc4836', // red
+  D: '#dd8a36', // orange
+  E: '#c9a83a', // gold
+  F: '#4aa84a', // green
+  G: '#3a9fb8', // teal
+  A: '#3a6dc8', // blue
+  B: '#9a3ac8', // violet
 }
 
 // Unlock ladder per the design plan: C → G → E → F → D → A → B. Keys assigned
 // left-to-right on the home row — first four pads cover ASDF.
 const PAD_KEYS = ['a', 's', 'd', 'f', 'g', 'h', 'j']
 const PADS: Pad[] = [
-  { id: 'C', label: 'C', ratio: 1, ratioLabel: '1:1', key: PAD_KEYS[0] },
-  { id: 'G', label: 'G', ratio: 3 / 2, ratioLabel: '3:2', key: PAD_KEYS[1] },
+  { id: 'C', label: 'C', ratio: 1,     ratioLabel: '1:1', color: PAD_COLORS.C, key: PAD_KEYS[0] },
+  { id: 'G', label: 'G', ratio: 3 / 2, ratioLabel: '3:2', color: PAD_COLORS.G, key: PAD_KEYS[1] },
 ]
 
 type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
@@ -128,7 +142,6 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       const styles = getComputedStyle(document.documentElement)
       const accent = styles.getPropertyValue('--accent').trim() || '#aa3bff'
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
-      const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
 
       const maxRatio = PADS.reduce((m, p) => (p.ratio > m ? p.ratio : m), 1)
@@ -141,43 +154,65 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       }
       const baselineY = cssH - 18
 
-      // baseline + pad ticks
+      // baseline + pad ticks (each tick takes its pad's color)
       ctx2d.strokeStyle = border
       ctx2d.lineWidth = 1
       ctx2d.beginPath()
       ctx2d.moveTo(0, baselineY)
       ctx2d.lineTo(cssW, baselineY)
       ctx2d.stroke()
-      ctx2d.fillStyle = textM
       ctx2d.font = '10px ui-monospace, Menlo, Consolas, monospace'
       ctx2d.textAlign = 'center'
       ctx2d.textBaseline = 'top'
       for (const p of PADS) {
         const x = xOf(TONIC_HZ * p.ratio)
+        ctx2d.strokeStyle = p.color
         ctx2d.beginPath()
         ctx2d.moveTo(x, baselineY)
         ctx2d.lineTo(x, baselineY + 4)
         ctx2d.stroke()
+        ctx2d.fillStyle = withAlpha(p.color, 0.85)
         ctx2d.fillText(p.label, x, baselineY + 6)
       }
 
-      // cloud partials as vertical sticks topped with dots
-      const stickMax = cssH - 36
+      // Cloud partials, colored by emitting pad, with the fundamental (H1)
+      // visually distinguished from its overtones (H2+):
+      //   H1: thick stick, large filled dot, note-letter label above
+      //   H2+: thinner stick, smaller dot, tiny partial-number label
+      const stickMax = cssH - 38
+      ctx2d.textBaseline = 'alphabetic'
       for (const h of cloud) {
         const x = xOf(h.freq)
         const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
         const len = stickMax * 0.85 * norm
-        const opacity = Math.max(0.12, norm)
-        ctx2d.strokeStyle = withAlpha(accent, opacity * 0.6)
-        ctx2d.lineWidth = 2
+        const opacity = Math.max(0.15, norm)
+        const color = PAD_COLORS[h.noteId] ?? accent
+        const isFund = h.partial === 1
+
+        ctx2d.strokeStyle = withAlpha(color, opacity * (isFund ? 0.85 : 0.5))
+        ctx2d.lineWidth = isFund ? 3 : 1.5
         ctx2d.beginPath()
         ctx2d.moveTo(x, baselineY - 1)
         ctx2d.lineTo(x, baselineY - 1 - len)
         ctx2d.stroke()
-        ctx2d.fillStyle = withAlpha(accent, opacity)
+
+        const topY = baselineY - 1 - len
+        ctx2d.fillStyle = withAlpha(color, opacity)
         ctx2d.beginPath()
-        ctx2d.arc(x, baselineY - 1 - len, 2.5, 0, 2 * Math.PI)
+        ctx2d.arc(x, topY, isFund ? 4.5 : 2.2, 0, 2 * Math.PI)
         ctx2d.fill()
+
+        if (isFund) {
+          ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
+          ctx2d.textAlign = 'center'
+          ctx2d.fillStyle = withAlpha(color, opacity)
+          ctx2d.fillText(h.noteId, x, topY - 7)
+        } else if (norm > 0.3) {
+          ctx2d.font = '9px ui-monospace, Menlo, Consolas, monospace'
+          ctx2d.textAlign = 'left'
+          ctx2d.fillStyle = withAlpha(color, opacity * 0.8)
+          ctx2d.fillText(String(h.partial), x + 4, topY + 3)
+        }
       }
 
       // coincidence bursts
@@ -318,7 +353,10 @@ export function HarvestStage({ onTone, onResonance }: Props) {
                 onPointerDown={() => handlePad(pad)}
                 disabled={isCooling}
                 aria-label={`Play ${pad.label} (key ${pad.key.toUpperCase()})`}
-                style={{ ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms` }}
+                style={{
+                  ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
+                  ['--pad-color' as string]: pad.color,
+                }}
               >
                 <span className="pad-key" aria-hidden="true">{pad.key.toUpperCase()}</span>
                 <span className="pad-note">{pad.label}</span>

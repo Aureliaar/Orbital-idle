@@ -472,6 +472,7 @@ main h1 {
 }
 
 .pad {
+  --pad-color: var(--accent);
   position: relative;
   overflow: hidden;
   width: 100%;
@@ -480,7 +481,7 @@ main h1 {
   align-items: center;
   gap: 4px;
   padding: 18px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--pad-color) 35%, var(--border));
   border-radius: 12px;
   background: transparent;
   color: var(--text-h);
@@ -493,13 +494,12 @@ main h1 {
 }
 
 .pad:hover {
-  border-color: var(--accent-border);
+  border-color: var(--pad-color);
 }
 
 .pad:active {
-  background: var(--accent-bg);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--pad-color) 14%, transparent);
+  border-color: var(--pad-color);
   transform: scale(0.97);
 }
 
@@ -512,7 +512,7 @@ main h1 {
   position: absolute;
   inset: auto 0 0 0;
   height: 3px;
-  background: var(--accent);
+  background: var(--pad-color);
   transform-origin: right;
   transform: scaleX(0);
   pointer-events: none;
@@ -543,14 +543,15 @@ main h1 {
 
 .pad:active .pad-key,
 .pad.cooling .pad-key {
-  border-color: var(--accent-border);
-  color: var(--accent);
+  border-color: var(--pad-color);
+  color: var(--pad-color);
 }
 
 .pad-note {
   font-family: var(--mono);
   font-size: 1.6rem;
   font-weight: 600;
+  color: var(--pad-color);
 }
 
 .pad-ratio {
