@@ -39,14 +39,22 @@ const PLUCK_HIT_BOOST = 2.2
 
 const BURST_MS = 600
 
-type Pad = { id: string; label: string; ratio: number; ratioLabel: string }
+type Pad = {
+  id: string
+  label: string
+  ratio: number
+  ratioLabel: string
+  // Keyboard binding (lowercase, single key). Pads beyond ASDF will need
+  // more keys in PAD_KEYS once the unlock ladder ships.
+  key: string
+}
 
-// Unlock ladder per the design plan: C → G → E → F → D → A → B. v1 ships
-// the first two so we can prove the coincidence loop end-to-end; the rest
-// arrive when the unlock economy lands.
+// Unlock ladder per the design plan: C → G → E → F → D → A → B. Keys assigned
+// left-to-right on the home row — first four pads cover ASDF.
+const PAD_KEYS = ['a', 's', 'd', 'f', 'g', 'h', 'j']
 const PADS: Pad[] = [
-  { id: 'C', label: 'C', ratio: 1, ratioLabel: '1:1' },
-  { id: 'G', label: 'G', ratio: 3 / 2, ratioLabel: '3:2' },
+  { id: 'C', label: 'C', ratio: 1, ratioLabel: '1:1', key: PAD_KEYS[0] },
+  { id: 'G', label: 'G', ratio: 3 / 2, ratioLabel: '3:2', key: PAD_KEYS[1] },
 ]
 
 type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
@@ -277,6 +285,25 @@ export function HarvestStage({ onTone, onResonance }: Props) {
     }
   }, [])
 
+  // Keyboard bindings: each pad's `key` triggers handlePad. Ignored on
+  // repeat (cooldown handles spam, but holding a key shouldn't queue) and
+  // when a modifier is held so browser shortcuts still work.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      const pad = PADS.find((p) => p.key === k)
+      if (!pad) return
+      e.preventDefault()
+      handlePad(pad)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handlePad])
+
   return (
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
@@ -290,9 +317,10 @@ export function HarvestStage({ onTone, onResonance }: Props) {
                 className={`pad${isCooling ? ' cooling' : ''}`}
                 onPointerDown={() => handlePad(pad)}
                 disabled={isCooling}
-                aria-label={`Play ${pad.label}`}
+                aria-label={`Play ${pad.label} (key ${pad.key.toUpperCase()})`}
                 style={{ ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms` }}
               >
+                <span className="pad-key" aria-hidden="true">{pad.key.toUpperCase()}</span>
                 <span className="pad-note">{pad.label}</span>
                 <span className="pad-ratio">{pad.ratioLabel}</span>
                 <span className="pad-cooldown" aria-hidden="true" />
@@ -302,8 +330,8 @@ export function HarvestStage({ onTone, onResonance }: Props) {
         })}
       </ul>
       <p className="harvest-hint">
-        Tap a note for Tone. Tap a second note while the first is still ringing
-        and their shared partials pay Resonance.
+        Tap a note (or press its key) for Tone. Hit a second note while the
+        first is still ringing and their shared partials pay Resonance.
       </p>
     </section>
   )
