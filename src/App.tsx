@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AMSynth, Context, FMSynth, Gain, Panner, PluckSynth, setContext } from 'tone'
+import { AMSynth, Context, FMSynth, Panner, PluckSynth, setContext } from 'tone'
 import './App.css'
+import type { AudioGraph } from './audio'
+import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
+import { HarvestStage } from './HarvestStage'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
+
+type Tab = 'orbits' | 'harvest'
 
 const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
@@ -46,12 +51,10 @@ type ToneVoice = {
   panner: Panner
   freq: number
 }
-type AudioGraph = {
-  ctx: AudioContext
-  master: Gain
+type OrbitAudio = {
+  graph: AudioGraph
   voices: Map<BodyId, ToneVoice>
   earth: ToneVoice
-  audioEl: HTMLAudioElement | null
   timbre: Timbre
 }
 
@@ -92,7 +95,10 @@ function App() {
     return !!(window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
   })
   const [timbre, setTimbre] = useState<Timbre>('piano')
-  const audioRef = useRef<AudioGraph | null>(null)
+  const audioRef = useRef<OrbitAudio | null>(null)
+  const [tab, setTab] = useState<Tab>('orbits')
+  const [tone, setTone] = useState(0)
+  const [resonance, setResonance] = useState(0)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
@@ -180,7 +186,7 @@ function App() {
 
       const a = audioRef.current
       const phases = phaseRef.current
-      const audioReady = !!a && a.ctx.state === 'running'
+      const audioReady = !!a && a.graph.ctx.state === 'running'
       const strike = (voice: ToneVoice, velocity: number) => {
         if (!audioReady) return
         const v = Math.max(0, Math.min(1, velocity))
@@ -313,13 +319,13 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // iOS Safari only honors AudioContext.resume() called *synchronously* inside the
-  // user gesture that started it. Doing it from a useEffect after a setState (the
-  // previous shape of this code) leaves the context suspended on iPhone and no sound
-  // plays. Build the whole graph inside the click handler instead.
-  const stopAudio = useCallback((graph: AudioGraph) => {
-    const { ctx, master, voices, earth, audioEl } = graph
-    master.gain.rampTo(0, 0.3)
+  const stopAudio = useCallback((audio: OrbitAudio) => {
+    const { graph, voices, earth } = audio
+    teardownAudioGraph(graph, [])
+    // Dispose Tone synths just before the shared teardown closes the context.
+    // teardownAudioGraph schedules ctx.close() at (fadeOutS + 0.15) * 1000 ms
+    // = 450 ms with the default 0.3 s fade; we dispose at 400 ms so the
+    // synths come down on a still-open context.
     window.setTimeout(() => {
       for (const v of voices.values()) {
         v.synth.dispose()
@@ -327,57 +333,24 @@ function App() {
       }
       earth.synth.dispose()
       earth.panner.dispose()
-      master.dispose()
-      if (audioEl) {
-        audioEl.pause()
-        audioEl.srcObject = null
-      }
-      void ctx.close()
-    }, 450)
+    }, 400)
   }, [])
 
-  const buildAudio = useCallback((nextTimbre: Timbre): AudioGraph | null => {
-    const Ctor =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctor) return null
-    const ctx = new Ctor()
-    void ctx.resume()
-    // 1-sample silent buffer: legacy iOS unlock so subsequent oscillator output is audible.
-    const unlock = ctx.createBufferSource()
-    unlock.buffer = ctx.createBuffer(1, 1, 22050)
-    unlock.connect(ctx.destination)
-    unlock.start(0)
+  const buildAudio = useCallback((nextTimbre: Timbre): OrbitAudio | null => {
+    const graph = createAudioGraph({ lowpassHz: 1500, fadeInS: 0.6 })
+    if (!graph) return null
 
-    setContext(new Context({ context: ctx }))
-
-    const master = new Gain(0)
-    master.gain.rampTo(1, 0.6)
-
-    // iOS routes raw WebAudio through the "ambient" audio session category,
-    // which the silent/ringer switch mutes. Routing master → MediaStream →
-    // <audio playsinline> uses the "playback" category instead, so the drone
-    // plays even with silent mode on. Falls back to ctx.destination if the
-    // browser doesn't support MediaStream output.
-    let audioEl: HTMLAudioElement | null
-    try {
-      const streamDest = ctx.createMediaStreamDestination()
-      master.connect(streamDest)
-      audioEl = document.createElement('audio')
-      audioEl.setAttribute('playsinline', '')
-      audioEl.autoplay = true
-      audioEl.srcObject = streamDest.stream
-      void audioEl.play()
-    } catch {
-      audioEl = null
-      master.connect(ctx.destination)
-    }
+    setContext(new Context({ context: graph.ctx }))
 
     const buildVoice = (hz: number, pan: number): ToneVoice => {
       const synth = buildSynth(nextTimbre)
       const panner = new Panner(pan)
       synth.connect(panner)
-      panner.connect(master)
+      // Bypass the shared low-pass: Tone synths shape their own timbres and
+      // the 1500 Hz filter would dampen FM piano partials. The filter still
+      // sits in the graph; we just don't route through it.
+      // Tone's connect accepts raw AudioNodes.
+      panner.connect(graph.master as unknown as AudioNode)
       return { synth, panner, freq: hz }
     }
 
@@ -389,7 +362,7 @@ function App() {
       voices.set(body.id, buildVoice(hz, pan))
     })
 
-    return { ctx, master, voices, earth, audioEl, timbre: nextTimbre }
+    return { graph, voices, earth, timbre: nextTimbre }
   }, [])
 
   const handleSoundToggle = useCallback(() => {
@@ -414,9 +387,9 @@ function App() {
   // strike phases so the very first audible frame fires the tonic chord.
   useEffect(() => {
     if (!audioOn) return
-    const graph = buildAudio(timbre)
-    if (!graph) return
-    audioRef.current = graph
+    const audio = buildAudio(timbre)
+    if (!audio) return
+    audioRef.current = audio
     primePhases()
 
     let unlock: (() => void) | null = null
@@ -426,16 +399,16 @@ function App() {
       window.removeEventListener('keydown', unlock)
       unlock = null
     }
-    if (graph.ctx.state !== 'running') {
+    if (audio.graph.ctx.state !== 'running') {
       unlock = () => {
         removeUnlock()
-        graph.ctx
+        audio.graph.ctx
           .resume()
           .then(() => {
-            // Prime AFTER resume completes so the strike gate (ctx.state === 'running')
-            // sees the primed phases on the very next frame and fires the tonic chord.
-            // Priming synchronously here would race the resume promise and the prime
-            // would be overwritten by the next frame before audio is ready.
+            // Prime AFTER resume completes so the strike gate sees the
+            // primed phases on the next frame; priming synchronously would
+            // race the resume promise and be overwritten before audio is
+            // actually ready.
             primePhases()
           })
           .catch(() => {})
@@ -446,9 +419,9 @@ function App() {
 
     return () => {
       removeUnlock()
-      if (audioRef.current === graph) {
+      if (audioRef.current === audio) {
         audioRef.current = null
-        stopAudio(graph)
+        stopAudio(audio)
       }
     }
   }, [audioOn, timbre, buildAudio, stopAudio, primePhases])
@@ -468,62 +441,104 @@ function App() {
   return (
     <main>
       <h1>Orbital</h1>
-      <p className="tagline">Diatonic wheel · Earth tonic · tap to launch, hold to upgrade</p>
-      <div className="controls">
+      <p className="tagline">
+        {tab === 'orbits'
+          ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
+          : 'Resonator · tap a note · catch its overtones'}
+      </p>
+      <nav className="tabs" role="tablist" aria-label="Stage">
         <button
           type="button"
-          className={`sound${audioOn ? ' on' : ''}`}
-          onClick={handleSoundToggle}
-          aria-pressed={audioOn}
-          aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+          role="tab"
+          className={`tab${tab === 'orbits' ? ' on' : ''}`}
+          aria-selected={tab === 'orbits'}
+          onClick={() => setTab('orbits')}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
-            {audioOn ? (
-              <>
-                <path d="M16 9 Q18 12 16 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M18 7 Q21 12 18 17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </>
-            ) : (
-              <path d="M16 9 L21 14 M21 9 L16 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            )}
-          </svg>
+          Orbits
         </button>
-        <div className="timbres" role="radiogroup" aria-label="Timbre">
-          {TIMBRES.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="radio"
-              aria-checked={timbre === t}
-              className={`timbre${timbre === t ? ' on' : ''}`}
-              onClick={() => handleTimbreChange(t)}
-            >
-              {TIMBRE_LABELS[t]}
-            </button>
-          ))}
+        <button
+          type="button"
+          role="tab"
+          className={`tab${tab === 'harvest' ? ' on' : ''}`}
+          aria-selected={tab === 'harvest'}
+          onClick={() => setTab('harvest')}
+        >
+          Resonator
+        </button>
+      </nav>
+      <dl className="currencies" aria-label="Currencies">
+        <div>
+          <dt>Tone</dt>
+          <dd>{Math.floor(tone)}</dd>
         </div>
-      </div>
-      <canvas
-        ref={canvasRef}
-        className="orbit"
-        aria-label="Seven bodies on a diatonic wheel"
-      />
-      <ul className="tiles" role="list">
-        {TARGETS.map((body) => (
-          <li key={body.id}>
-            <PlanetTile
-              body={body}
-              armed={armed[body.id] ?? false}
-              flying={flying.has(body.id)}
-              onLaunch={() => onLaunch(body)}
-              onLongPress={() => setUpgradeFor(body)}
-            />
-          </li>
-        ))}
-      </ul>
-      {upgradeFor && (
-        <UpgradePanel body={upgradeFor} onClose={() => setUpgradeFor(null)} />
+        <div>
+          <dt>Resonance</dt>
+          <dd>{resonance.toFixed(1)}</dd>
+        </div>
+      </dl>
+      <section className="stage" hidden={tab !== 'orbits'} aria-hidden={tab !== 'orbits'}>
+        <div className="controls">
+          <button
+            type="button"
+            className={`sound${audioOn ? ' on' : ''}`}
+            onClick={handleSoundToggle}
+            aria-pressed={audioOn}
+            aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
+              {audioOn ? (
+                <>
+                  <path d="M16 9 Q18 12 16 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M18 7 Q21 12 18 17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </>
+              ) : (
+                <path d="M16 9 L21 14 M21 9 L16 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
+          <div className="timbres" role="radiogroup" aria-label="Timbre">
+            {TIMBRES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="radio"
+                aria-checked={timbre === t}
+                className={`timbre${timbre === t ? ' on' : ''}`}
+                onClick={() => handleTimbreChange(t)}
+              >
+                {TIMBRE_LABELS[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <canvas
+          ref={canvasRef}
+          className="orbit"
+          aria-label="Seven bodies on a diatonic wheel"
+        />
+        <ul className="tiles" role="list">
+          {TARGETS.map((body) => (
+            <li key={body.id}>
+              <PlanetTile
+                body={body}
+                armed={armed[body.id] ?? false}
+                flying={flying.has(body.id)}
+                onLaunch={() => onLaunch(body)}
+                onLongPress={() => setUpgradeFor(body)}
+              />
+            </li>
+          ))}
+        </ul>
+        {upgradeFor && (
+          <UpgradePanel body={upgradeFor} onClose={() => setUpgradeFor(null)} />
+        )}
+      </section>
+      {tab === 'harvest' && (
+        <HarvestStage
+          onTone={(d) => setTone((t) => t + d)}
+          onResonance={(d) => setResonance((r) => r + d)}
+        />
       )}
     </main>
   )
