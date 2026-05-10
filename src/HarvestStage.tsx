@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
+import { BODIES, ratioLabel as toRatioLabel } from './bodies'
+import type { BodyId } from './bodies'
+import {
+  COINCIDENCE_TOL,
+  HARMONIC_COUNT,
+  PAD_COLORS,
+  RESONANCE_GAIN,
+  RING_DURATION_MS,
+  RING_DURATION_S,
+  SLOT_COUNT,
+  TONE_PER_TAP,
+  TONIC_HZ,
+} from './harvest-config'
 import {
   defaultAmp,
   harmonicSeries,
@@ -8,84 +21,40 @@ import {
 } from './harmonics'
 import type { Coincidence, Harmonic } from './harmonics'
 
-// Tonic frequency: C3 (130.81 Hz). Matches the orbital stage's EARTH_HZ so
-// dropping the harvest pluck synth on top of the orbital drone stays in tune.
-const TONIC_HZ = 261.63 / 2
-
-// How many partials per tap. With H1..H4, the first coincidence for octave
-// (2:1), fifth (3:2), and fourth (4:3) is reachable; thirds (5:4, 6:5) need
-// H≥5; M2 (9:8) needs H≥8; M7 (15:8) needs H≥15. That's the unlock ladder.
-const HARMONIC_COUNT = 4
-
-// Single source of truth for "how long does a tap ring?" — visual partials
-// fade linearly to zero over this window, the pluck synth's envelope ends
-// at the same instant, and a tapped pad stays on cooldown for the same
-// duration. Anything else creates the visual-vs-audio mismatch.
-const RING_DURATION_S = 1.5
-const RING_DURATION_MS = RING_DURATION_S * 1000
-
-// Coincidence detection tolerance — 0.5% ≈ 8.6 cents. Just-intonation pairs
-// match exactly; the slack is forgiveness for future equal-temperament.
-const COINCIDENCE_TOL = 0.005
-
-// Tuned so a perfect-fifth coincidence (H3·H2 = 1/3·1/2 ≈ 0.167) tapped
-// near the start of the ring gives ~5 Resonance.
-const RESONANCE_GAIN = 32
-const TONE_PER_TAP = 1
-
-// Pluck synth envelope.
 const PLUCK_GAIN = 0.18
 const PLUCK_HIT_BOOST = 2.2
 
 const BURST_MS = 600
 
-type Pad = {
-  id: string
-  label: string
-  ratio: number
-  ratioLabel: string
-  color: string
-  // Keyboard binding (lowercase, single key). Pads beyond ASDF will need
-  // more keys in PAD_KEYS once the unlock ladder ships.
-  key: string
-}
+const SLOT_KEYS = ['a', 's']
 
-// Diatonic-color mapping (Newton / Boomwhacker tradition). Reserved up-front
-// for all seven unlock-ladder pads so cloud partials can be colored by
-// noteId regardless of which pads have shipped yet.
-const PAD_COLORS: Record<string, string> = {
-  C: '#dc4836', // red
-  D: '#dd8a36', // orange
-  E: '#c9a83a', // gold
-  F: '#4aa84a', // green
-  G: '#3a9fb8', // teal
-  A: '#3a6dc8', // blue
-  B: '#9a3ac8', // violet
-}
-
-// Unlock ladder per the design plan: C → G → E → F → D → A → B. Keys assigned
-// left-to-right on the home row — first four pads cover ASDF.
-const PAD_KEYS = ['a', 's', 'd', 'f', 'g', 'h', 'j']
-const PADS: Pad[] = [
-  { id: 'C', label: 'C', ratio: 1,     ratioLabel: '1:1', color: PAD_COLORS.C, key: PAD_KEYS[0] },
-  { id: 'G', label: 'G', ratio: 3 / 2, ratioLabel: '3:2', color: PAD_COLORS.G, key: PAD_KEYS[1] },
-]
+// Auto-pluck cadence equals slot cooldown so consecutive auto-plucks land
+// exactly when the slot becomes available again. Slot 2 fires offset by
+// half a cadence so both clouds overlap mid-life — that's when their
+// coincidence bonus is biggest.
+const AUTO_CADENCE_MS = RING_DURATION_MS
+const AUTO_STAGGER_MS = RING_DURATION_MS / 2
 
 type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
 
 type Props = {
+  unlockedIds: readonly BodyId[]
+  slots: ReadonlyArray<BodyId | null>
+  onSlotChange: (slotIdx: number, noteId: BodyId | null) => void
   onTone: (delta: number) => void
   onResonance: (delta: number) => void
 }
 
-export function HarvestStage({ onTone, onResonance }: Props) {
+export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onResonance }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
   const nextBurstIdRef = useRef(1)
-  const coolingRef = useRef<Set<string>>(new Set())
-  const [cooling, setCooling] = useState<ReadonlySet<string>>(() => new Set())
+  const coolingRef = useRef<Set<number>>(new Set())
+  const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
+  const [openPickerIdx, setOpenPickerIdx] = useState<number | null>(null)
+  const slotsRef = useRef(slots)
   const onToneRef = useRef(onTone)
   const onResonanceRef = useRef(onResonance)
 
@@ -95,6 +64,9 @@ export function HarvestStage({ onTone, onResonance }: Props) {
   useEffect(() => {
     onResonanceRef.current = onResonance
   }, [onResonance])
+  useEffect(() => {
+    slotsRef.current = slots
+  }, [slots])
 
   // rAF: decay cloud + bursts, redraw spectrum strip.
   useEffect(() => {
@@ -106,13 +78,17 @@ export function HarvestStage({ onTone, onResonance }: Props) {
     let raf = 0
     let last = performance.now()
 
+    // Spectrum X-axis is fixed across the full diatonic ladder (max ratio =
+    // B at 15/8, max partial = HARMONIC_COUNT) so the scale doesn't jump as
+    // the player unlocks more notes.
+    const maxRatio = BODIES.reduce((m, b) => (b.ratio > m ? b.ratio : m), 1)
+    const fMin = TONIC_HZ * 0.95
+    const fMax = TONIC_HZ * maxRatio * HARMONIC_COUNT * 1.05
+
     const draw = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
 
-      // Linear decay over RING_DURATION_S so visuals die at exactly the same
-      // instant the audio envelope ends. amp drops by (bornAmp / ring) per
-      // second; pruned the moment it crosses zero.
       const cloud = cloudRef.current
       let w = 0
       for (let i = 0; i < cloud.length; i++) {
@@ -144,9 +120,6 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
 
-      const maxRatio = PADS.reduce((m, p) => (p.ratio > m ? p.ratio : m), 1)
-      const fMin = TONIC_HZ * 0.95
-      const fMax = TONIC_HZ * maxRatio * HARMONIC_COUNT * 1.05
       const padX = 14
       const xOf = (f: number) => {
         const u = Math.log(f / fMin) / Math.log(fMax / fMin)
@@ -154,7 +127,6 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       }
       const baselineY = cssH - 18
 
-      // baseline + pad ticks (each tick takes its pad's color)
       ctx2d.strokeStyle = border
       ctx2d.lineWidth = 1
       ctx2d.beginPath()
@@ -164,21 +136,25 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       ctx2d.font = '10px ui-monospace, Menlo, Consolas, monospace'
       ctx2d.textAlign = 'center'
       ctx2d.textBaseline = 'top'
-      for (const p of PADS) {
-        const x = xOf(TONIC_HZ * p.ratio)
-        ctx2d.strokeStyle = p.color
+
+      // Tick + letter for each currently-slotted note. Same-note exclusion
+      // means a note appears at most once.
+      const slotsNow = slotsRef.current
+      for (const id of slotsNow) {
+        if (!id) continue
+        const body = BODIES.find((b) => b.id === id)
+        if (!body) continue
+        const x = xOf(TONIC_HZ * body.ratio)
+        const color = PAD_COLORS[id] ?? accent
+        ctx2d.strokeStyle = color
         ctx2d.beginPath()
         ctx2d.moveTo(x, baselineY)
         ctx2d.lineTo(x, baselineY + 4)
         ctx2d.stroke()
-        ctx2d.fillStyle = withAlpha(p.color, 0.85)
-        ctx2d.fillText(p.label, x, baselineY + 6)
+        ctx2d.fillStyle = withAlpha(color, 0.85)
+        ctx2d.fillText(id, x, baselineY + 6)
       }
 
-      // Cloud partials, colored by emitting pad, with the fundamental (H1)
-      // visually distinguished from its overtones (H2+):
-      //   H1: thick stick, large filled dot, note-letter label above
-      //   H2+: thinner stick, smaller dot, tiny partial-number label
       const stickMax = cssH - 38
       ctx2d.textBaseline = 'alphabetic'
       for (const h of cloud) {
@@ -215,7 +191,6 @@ export function HarvestStage({ onTone, onResonance }: Props) {
         }
       }
 
-      // coincidence bursts
       for (const b of bursts) {
         const u = (now - b.bornMs) / BURST_MS
         const x = xOf(b.freq)
@@ -239,7 +214,7 @@ export function HarvestStage({ onTone, onResonance }: Props) {
         ctx2d.textAlign = 'center'
         ctx2d.textBaseline = 'middle'
         ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('tap a note — its overtones will linger here', cssW / 2, cssH / 2)
+        ctx2d.fillText('assign a note to a slot to start ringing', cssW / 2, cssH / 2)
         ctx2d.globalAlpha = 1
       }
 
@@ -261,22 +236,28 @@ export function HarvestStage({ onTone, onResonance }: Props) {
     }
   }, [])
 
-  const handlePad = useCallback((pad: Pad) => {
-    // Cooldown blocks a pad until its prior pluck has fully decayed. This is
-    // both UX (no double-trigger spam) and a clean way to prevent same-note
-    // self-coincidence: when the cooldown ends, that pad's partials are at
-    // amp=0 and have been pruned, so there's nothing in the cloud to match.
-    if (coolingRef.current.has(pad.id)) return
-    coolingRef.current.add(pad.id)
+  // Core slot trigger — manual taps, keyboard, and auto-pluck all route
+  // through here so the cooldown / coincidence / audio / cloud paths stay
+  // identical regardless of who fired.
+  const handleSlot = useCallback((slotIdx: number, opts?: { silent?: boolean }) => {
+    const slotsNow = slotsRef.current
+    const noteId = slotsNow[slotIdx]
+    if (!noteId) return
+    if (coolingRef.current.has(slotIdx)) return
+
+    const body = BODIES.find((b) => b.id === noteId)
+    if (!body) return
+
+    coolingRef.current.add(slotIdx)
     setCooling(new Set(coolingRef.current))
     window.setTimeout(() => {
-      if (coolingRef.current.delete(pad.id)) {
+      if (coolingRef.current.delete(slotIdx)) {
         setCooling(new Set(coolingRef.current))
       }
     }, RING_DURATION_MS)
 
     const now = performance.now()
-    const fund = TONIC_HZ * pad.ratio
+    const fund = TONIC_HZ * body.ratio
     const incoming = harmonicSeries(fund, HARMONIC_COUNT, defaultAmp)
 
     const cloud = cloudRef.current
@@ -298,19 +279,20 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       }
     }
 
-    // iOS Safari requires AudioContext.resume() *synchronously* in the gesture.
-    // Build the graph lazily, but inside this click handler — never in an effect.
-    if (!audioRef.current) {
+    // Audio: only play if the context has already been unlocked by a prior
+    // user gesture. Auto-plucks before the first manual tap stay silent
+    // (visuals + score still tick) — iOS Safari requires .resume() to come
+    // synchronously from a real gesture, so we never try here.
+    if (!opts?.silent && !audioRef.current) {
       const g = createAudioGraph({ lowpassHz: 4000, fadeInS: 0.05 })
       if (g) audioRef.current = g
     }
     const audio = audioRef.current
-    if (audio) playPluck(audio, incoming, hits)
+    if (audio && !opts?.silent) playPluck(audio, incoming, hits)
 
-    // Push this tap's partials.
     for (const ih of incoming) {
       cloud.push({
-        noteId: pad.id,
+        noteId: body.id,
         partial: ih.partial,
         freq: ih.freq,
         amp: ih.amp,
@@ -320,9 +302,28 @@ export function HarvestStage({ onTone, onResonance }: Props) {
     }
   }, [])
 
-  // Keyboard bindings: each pad's `key` triggers handlePad. Ignored on
-  // repeat (cooldown handles spam, but holding a key shouldn't queue) and
-  // when a modifier is held so browser shortcuts still work.
+  // Auto-pluck: each slot fires on a fixed cadence, staggered so the two
+  // clouds overlap mid-life. Timers are slot-indexed, never note-indexed —
+  // so swapping a note into a slot doesn't reset the rhythm.
+  useEffect(() => {
+    const timers: number[] = []
+    const intervalIds: number[] = []
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const delay = i * AUTO_STAGGER_MS
+      timers.push(
+        window.setTimeout(() => {
+          handleSlot(i)
+          intervalIds.push(window.setInterval(() => handleSlot(i), AUTO_CADENCE_MS))
+        }, delay),
+      )
+    }
+    return () => {
+      for (const t of timers) window.clearTimeout(t)
+      for (const id of intervalIds) window.clearInterval(id)
+    }
+  }, [handleSlot])
+
+  // Keyboard bindings: A → slot 0, S → slot 1.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return
@@ -330,46 +331,132 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       const k = e.key.toLowerCase()
-      const pad = PADS.find((p) => p.key === k)
-      if (!pad) return
+      const idx = SLOT_KEYS.indexOf(k)
+      if (idx === -1 || idx >= SLOT_COUNT) return
       e.preventDefault()
-      handlePad(pad)
+      handleSlot(idx)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handlePad])
+  }, [handleSlot])
+
+  // Click-outside / Escape closes any open picker.
+  useEffect(() => {
+    if (openPickerIdx === null) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null
+      if (!t) return
+      if (t.closest('.slot-picker') || t.closest('.slot-picker-toggle')) return
+      setOpenPickerIdx(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenPickerIdx(null)
+    }
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [openPickerIdx])
+
+  const assignSlot = useCallback(
+    (slotIdx: number, noteId: BodyId | null) => {
+      onSlotChange(slotIdx, noteId)
+      setOpenPickerIdx(null)
+    },
+    [onSlotChange],
+  )
 
   return (
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
       <ul className="pads" role="list">
-        {PADS.map((pad) => {
-          const isCooling = cooling.has(pad.id)
+        {Array.from({ length: SLOT_COUNT }, (_, idx) => {
+          const noteId = slots[idx] ?? null
+          const body = noteId ? BODIES.find((b) => b.id === noteId) ?? null : null
+          const color = body ? PAD_COLORS[body.id] : 'var(--border)'
+          const isCooling = cooling.has(idx)
+          const slotKey = SLOT_KEYS[idx]
+          const pickerOpen = openPickerIdx === idx
           return (
-            <li key={pad.id}>
+            <li key={idx} className="slot">
               <button
                 type="button"
-                className={`pad${isCooling ? ' cooling' : ''}`}
-                onPointerDown={() => handlePad(pad)}
-                disabled={isCooling}
-                aria-label={`Play ${pad.label} (key ${pad.key.toUpperCase()})`}
+                className={`pad${isCooling ? ' cooling' : ''}${body ? '' : ' empty'}`}
+                onPointerDown={() => handleSlot(idx)}
+                disabled={isCooling || !body}
+                aria-label={
+                  body
+                    ? `Play ${body.id} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
+                    : `Empty slot ${idx + 1}`
+                }
                 style={{
                   ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
-                  ['--pad-color' as string]: pad.color,
+                  ['--pad-color' as string]: color,
                 }}
               >
-                <span className="pad-key" aria-hidden="true">{pad.key.toUpperCase()}</span>
-                <span className="pad-note">{pad.label}</span>
-                <span className="pad-ratio">{pad.ratioLabel}</span>
+                <span className="pad-key" aria-hidden="true">{slotKey?.toUpperCase()}</span>
+                <span className="pad-note">{body ? body.id : '—'}</span>
+                <span className="pad-ratio">{body ? toRatioLabel(body.ratio) : 'empty'}</span>
                 <span className="pad-cooldown" aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                className={`slot-picker-toggle${pickerOpen ? ' open' : ''}`}
+                onClick={() => setOpenPickerIdx(pickerOpen ? null : idx)}
+                aria-haspopup="listbox"
+                aria-expanded={pickerOpen}
+                aria-label={`Choose note for slot ${idx + 1}`}
+              >
+                <span aria-hidden="true">▾</span>
+              </button>
+              {pickerOpen && (
+                <div className="slot-picker" role="listbox" aria-label={`Slot ${idx + 1} note`}>
+                  {body && (
+                    <button
+                      type="button"
+                      className="slot-picker-item slot-picker-clear"
+                      onClick={() => assignSlot(idx, null)}
+                    >
+                      <span className="slot-picker-swatch" aria-hidden="true" />
+                      <span className="slot-picker-label">clear</span>
+                    </button>
+                  )}
+                  {BODIES.map((b) => {
+                    if (!unlockedIds.includes(b.id)) return null
+                    const inOther = slots.some((s, i) => i !== idx && s === b.id)
+                    const isCurrent = body?.id === b.id
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isCurrent}
+                        className={`slot-picker-item${isCurrent ? ' on' : ''}`}
+                        disabled={inOther}
+                        onClick={() => assignSlot(idx, b.id)}
+                      >
+                        <span
+                          className="slot-picker-swatch"
+                          aria-hidden="true"
+                          style={{ background: PAD_COLORS[b.id] }}
+                        />
+                        <span className="slot-picker-label">{b.id}</span>
+                        <span className="slot-picker-ratio">{toRatioLabel(b.ratio)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </li>
           )
         })}
       </ul>
       <p className="harvest-hint">
-        Tap a note (or press its key) for Tone. Hit a second note while the
-        first is still ringing and their shared partials pay Resonance.
+        Slots auto-fire on a 1.5 s cadence. Tap (or press A/S) to pluck early.
+        Swap notes via the ▾ next to each slot — coincident partials pay
+        Resonance.
       </p>
     </section>
   )
@@ -404,14 +491,12 @@ function playPluck(
     o.stop(t0 + RING_DURATION_S + 0.05)
   }
 
-  // Disconnect the per-tap envelope after it has decayed so we don't pile up
-  // dangling nodes on the filter input.
   window.setTimeout(
     () => {
       try {
         env.disconnect()
       } catch {
-        // already disconnected (context closed) — ignore.
+        // already disconnected — ignore.
       }
     },
     (RING_DURATION_S + 0.2) * 1000,

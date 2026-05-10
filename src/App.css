@@ -566,3 +566,203 @@ main h1 {
   color: var(--text);
   text-align: center;
 }
+
+/* --- Slot picker (▾ next to each pad) --- */
+
+.slot {
+  position: relative;
+}
+
+.pad.empty {
+  --pad-color: var(--border);
+  border-style: dashed;
+}
+
+.pad.empty .pad-note {
+  color: var(--text);
+  opacity: 0.45;
+}
+
+.slot-picker-toggle {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.slot-picker-toggle:hover,
+.slot-picker-toggle.open {
+  color: var(--text-h);
+  border-color: var(--text-h);
+}
+
+.slot-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.slot-picker-item {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+}
+
+.slot-picker-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-h) 6%, transparent);
+}
+
+.slot-picker-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.slot-picker-item.on {
+  background: color-mix(in srgb, var(--text-h) 4%, transparent);
+  font-weight: 600;
+}
+
+.slot-picker-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.slot-picker-label {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+.slot-picker-ratio {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.slot-picker-clear {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  padding-bottom: 6px;
+  color: var(--text);
+}
+
+/* --- Progression: idle rate + unlock cards --- */
+
+.resonator-progress {
+  width: min(720px, 96vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.idle-rate {
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text);
+  font-family: var(--mono);
+}
+
+.idle-rate strong {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.unlocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.unlock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.unlock.next {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.unlock-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unlock-note {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.unlock-cost {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.unlock-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.unlock-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.unlock-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}

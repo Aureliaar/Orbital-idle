@@ -5,10 +5,28 @@ import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
 import { HarvestStage } from './HarvestStage'
+import { computeIdleRate, SLOT_COUNT } from './harvest-config'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
 
 type Tab = 'orbits' | 'harvest'
+
+// Unlock order — chosen so the first purchase (E, M3 5:4) introduces a
+// small but real Resonance trickle via C+E coincidence, and the second (G,
+// P5 3:2) gives the canonical "fifth" jump (~4× the M3 rate). D and B
+// remain low-coincidence with C alone but become useful once paired with
+// G or F. C is pre-unlocked; E costs Tone only (no way to earn Resonance
+// until a second note exists); all later unlocks cost both currencies.
+const UNLOCK_LADDER: BodyId[] = ['C', 'E', 'G', 'F', 'A', 'D', 'B']
+const UNLOCK_COSTS: Record<BodyId, { tone: number; resonance: number }> = {
+  C: { tone: 0, resonance: 0 },
+  E: { tone: 60, resonance: 0 },
+  G: { tone: 250, resonance: 8 },
+  F: { tone: 700, resonance: 40 },
+  A: { tone: 1800, resonance: 150 },
+  D: { tone: 4000, resonance: 500 },
+  B: { tone: 9000, resonance: 1500 },
+}
 
 const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
@@ -54,6 +72,12 @@ function App() {
   const [tab, setTab] = useState<Tab>('orbits')
   const [tone, setTone] = useState(0)
   const [resonance, setResonance] = useState(0)
+  const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
+  const [slots, setSlots] = useState<(BodyId | null)[]>(() => {
+    const init: (BodyId | null)[] = Array(SLOT_COUNT).fill(null)
+    init[0] = 'C'
+    return init
+  })
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
@@ -331,6 +355,55 @@ function App() {
     }
   }, [stopAudio])
 
+  const idleRate = computeIdleRate(slots)
+
+  // Off-tab idle accrual. On the Resonator tab, auto-plucks credit
+  // Tone/Resonance directly via the existing callbacks — running the
+  // ticker too would double-count. Off-tab, drive the same per-second
+  // numbers analytically so progression doesn't stall when the player is
+  // looking at the orbits.
+  useEffect(() => {
+    if (tab === 'harvest') return
+    if (idleRate.tonePerSec === 0 && idleRate.resonancePerSec === 0) return
+    let last = performance.now()
+    const id = window.setInterval(() => {
+      const now = performance.now()
+      const dt = (now - last) / 1000
+      last = now
+      if (idleRate.tonePerSec > 0) setTone((t) => t + idleRate.tonePerSec * dt)
+      if (idleRate.resonancePerSec > 0) setResonance((r) => r + idleRate.resonancePerSec * dt)
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [tab, idleRate.tonePerSec, idleRate.resonancePerSec])
+
+  const handleSlotChange = useCallback((slotIdx: number, noteId: BodyId | null) => {
+    setSlots((prev) => {
+      const next = prev.slice()
+      // Same-note exclusion: if the chosen note already occupies another
+      // slot, clear that slot first. The picker also disables it but this
+      // is the safety net.
+      if (noteId !== null) {
+        for (let i = 0; i < next.length; i++) {
+          if (i !== slotIdx && next[i] === noteId) next[i] = null
+        }
+      }
+      next[slotIdx] = noteId
+      return next
+    })
+  }, [])
+
+  const handleUnlock = useCallback((id: BodyId) => {
+    if (unlockedIds.includes(id)) return
+    const cost = UNLOCK_COSTS[id]
+    if (tone < cost.tone || resonance < cost.resonance) return
+    setTone((t) => t - cost.tone)
+    setResonance((r) => r - cost.resonance)
+    setUnlockedIds((prev) => [...prev, id])
+  }, [unlockedIds, tone, resonance])
+
+  // Next 1–2 ladder steps the player hasn't unlocked yet.
+  const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
+
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
     if (probesRef.current.has(body.id)) return
@@ -426,10 +499,54 @@ function App() {
         )}
       </section>
       {tab === 'harvest' && (
-        <HarvestStage
-          onTone={(d) => setTone((t) => t + d)}
-          onResonance={(d) => setResonance((r) => r + d)}
-        />
+        <>
+          <HarvestStage
+            unlockedIds={unlockedIds}
+            slots={slots}
+            onSlotChange={handleSlotChange}
+            onTone={(d) => setTone((t) => t + d)}
+            onResonance={(d) => setResonance((r) => r + d)}
+          />
+          <section className="resonator-progress" aria-label="Progression">
+            <p className="idle-rate">
+              Idle{' '}
+              <span>
+                <strong>{idleRate.resonancePerSec.toFixed(2)}</strong> res/s
+              </span>
+              {' · '}
+              <span>
+                <strong>{idleRate.tonePerSec.toFixed(2)}</strong> tone/s
+              </span>
+            </p>
+            {nextUnlocks.length > 0 && (
+              <ul className="unlocks" role="list">
+                {nextUnlocks.map((id, i) => {
+                  const cost = UNLOCK_COSTS[id]
+                  const affordable = tone >= cost.tone && resonance >= cost.resonance
+                  return (
+                    <li key={id} className={`unlock${i === 0 ? ' next' : ''}`}>
+                      <div className="unlock-info">
+                        <span className="unlock-note">{id}</span>
+                        <span className="unlock-cost">
+                          {cost.tone} Tone
+                          {cost.resonance > 0 ? ` · ${cost.resonance} Resonance` : ''}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="unlock-btn"
+                        disabled={!affordable}
+                        onClick={() => handleUnlock(id)}
+                      >
+                        Unlock
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        </>
       )}
     </main>
   )
