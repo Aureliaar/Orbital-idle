@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
+import type { AudioGraph } from './audio'
+import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
+import { HarvestStage } from './HarvestStage'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
+
+type Tab = 'orbits' | 'harvest'
 
 const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
@@ -29,12 +34,10 @@ const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0
 type Probe = { startMs: number }
 type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
-type AudioGraph = {
-  ctx: AudioContext
-  master: GainNode
+type OrbitAudio = {
+  graph: AudioGraph
   voices: Map<BodyId, GainNode>
   stops: OscillatorNode[]
-  audioEl: HTMLAudioElement | null
 }
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
@@ -47,7 +50,10 @@ function App() {
   const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
   const [audioOn, setAudioOn] = useState(false)
-  const audioRef = useRef<AudioGraph | null>(null)
+  const audioRef = useRef<OrbitAudio | null>(null)
+  const [tab, setTab] = useState<Tab>('orbits')
+  const [tone, setTone] = useState(0)
+  const [resonance, setResonance] = useState(0)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
@@ -134,7 +140,7 @@ function App() {
 
       const a = audioRef.current
       if (a) {
-        const tnow = a.ctx.currentTime
+        const tnow = a.graph.ctx.currentTime
         for (const [id, voice] of a.voices) {
           const s = swells.get(id)
           if (!s) continue
@@ -246,24 +252,8 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // iOS Safari only honors AudioContext.resume() called *synchronously* inside the
-  // user gesture that started it. Doing it from a useEffect after a setState (the
-  // previous shape of this code) leaves the context suspended on iPhone and no sound
-  // plays. Build the whole graph inside the click handler instead.
-  const stopAudio = useCallback((graph: AudioGraph) => {
-    const { ctx, master, stops, audioEl } = graph
-    const tnow = ctx.currentTime
-    master.gain.cancelScheduledValues(tnow)
-    master.gain.setValueAtTime(master.gain.value, tnow)
-    master.gain.linearRampToValueAtTime(0, tnow + 0.3)
-    for (const o of stops) o.stop(tnow + 0.35)
-    window.setTimeout(() => {
-      if (audioEl) {
-        audioEl.pause()
-        audioEl.srcObject = null
-      }
-      void ctx.close()
-    }, 450)
+  const stopAudio = useCallback((audio: OrbitAudio) => {
+    teardownAudioGraph(audio.graph, audio.stops)
   }, [])
 
   const handleSoundToggle = useCallback(() => {
@@ -275,46 +265,9 @@ function App() {
       return
     }
 
-    const Ctor =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctor) return
-    const ctx = new Ctor()
-    void ctx.resume()
-    // 1-sample silent buffer: legacy iOS unlock so subsequent oscillator output is audible.
-    const unlock = ctx.createBufferSource()
-    unlock.buffer = ctx.createBuffer(1, 1, 22050)
-    unlock.connect(ctx.destination)
-    unlock.start(0)
-
-    const master = ctx.createGain()
-    master.gain.value = 0
-    master.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.6)
-
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.value = 1500
-    filter.Q.value = 0.5
-    filter.connect(master)
-
-    // iOS routes raw WebAudio through the "ambient" audio session category,
-    // which the silent/ringer switch mutes. Routing master → MediaStream →
-    // <audio playsinline> uses the "playback" category instead, so the drone
-    // plays even with silent mode on. Falls back to ctx.destination if the
-    // browser doesn't support MediaStream output.
-    let audioEl: HTMLAudioElement | null
-    try {
-      const streamDest = ctx.createMediaStreamDestination()
-      master.connect(streamDest)
-      audioEl = document.createElement('audio')
-      audioEl.setAttribute('playsinline', '')
-      audioEl.autoplay = true
-      audioEl.srcObject = streamDest.stream
-      void audioEl.play()
-    } catch {
-      audioEl = null
-      master.connect(ctx.destination)
-    }
+    const graph = createAudioGraph({ lowpassHz: 1500 })
+    if (!graph) return
+    const { ctx, filter } = graph
 
     const stops: OscillatorNode[] = []
     const buildVoice = (hz: number, pan: number, baseGain: number, lfoHz: number) => {
@@ -365,16 +318,16 @@ function App() {
       voices.set(body.id, buildVoice(hz, pan, base, lfoHz))
     })
 
-    audioRef.current = { ctx, master, voices, stops, audioEl }
+    audioRef.current = { graph, voices, stops }
     setAudioOn(true)
   }, [stopAudio])
 
   useEffect(() => {
     return () => {
-      const graph = audioRef.current
-      if (!graph) return
+      const audio = audioRef.current
+      if (!audio) return
       audioRef.current = null
-      stopAudio(graph)
+      stopAudio(audio)
     }
   }, [stopAudio])
 
@@ -393,48 +346,90 @@ function App() {
   return (
     <main>
       <h1>Orbital</h1>
-      <p className="tagline">Diatonic wheel · Earth tonic · tap to launch, hold to upgrade</p>
-      <div className="controls">
+      <p className="tagline">
+        {tab === 'orbits'
+          ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
+          : 'Resonator · tap a note · catch its overtones'}
+      </p>
+      <nav className="tabs" role="tablist" aria-label="Stage">
         <button
           type="button"
-          className={`sound${audioOn ? ' on' : ''}`}
-          onClick={handleSoundToggle}
-          aria-pressed={audioOn}
-          aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+          role="tab"
+          className={`tab${tab === 'orbits' ? ' on' : ''}`}
+          aria-selected={tab === 'orbits'}
+          onClick={() => setTab('orbits')}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
-            {audioOn ? (
-              <>
-                <path d="M16 9 Q18 12 16 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M18 7 Q21 12 18 17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </>
-            ) : (
-              <path d="M16 9 L21 14 M21 9 L16 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            )}
-          </svg>
+          Orbits
         </button>
-      </div>
-      <canvas
-        ref={canvasRef}
-        className="orbit"
-        aria-label="Seven bodies on a diatonic wheel"
-      />
-      <ul className="tiles" role="list">
-        {TARGETS.map((body) => (
-          <li key={body.id}>
-            <PlanetTile
-              body={body}
-              armed={armed[body.id] ?? false}
-              flying={flying.has(body.id)}
-              onLaunch={() => onLaunch(body)}
-              onLongPress={() => setUpgradeFor(body)}
-            />
-          </li>
-        ))}
-      </ul>
-      {upgradeFor && (
-        <UpgradePanel body={upgradeFor} onClose={() => setUpgradeFor(null)} />
+        <button
+          type="button"
+          role="tab"
+          className={`tab${tab === 'harvest' ? ' on' : ''}`}
+          aria-selected={tab === 'harvest'}
+          onClick={() => setTab('harvest')}
+        >
+          Resonator
+        </button>
+      </nav>
+      <dl className="currencies" aria-label="Currencies">
+        <div>
+          <dt>Tone</dt>
+          <dd>{Math.floor(tone)}</dd>
+        </div>
+        <div>
+          <dt>Resonance</dt>
+          <dd>{resonance.toFixed(1)}</dd>
+        </div>
+      </dl>
+      <section className="stage" hidden={tab !== 'orbits'} aria-hidden={tab !== 'orbits'}>
+        <div className="controls">
+          <button
+            type="button"
+            className={`sound${audioOn ? ' on' : ''}`}
+            onClick={handleSoundToggle}
+            aria-pressed={audioOn}
+            aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
+              {audioOn ? (
+                <>
+                  <path d="M16 9 Q18 12 16 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M18 7 Q21 12 18 17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </>
+              ) : (
+                <path d="M16 9 L21 14 M21 9 L16 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
+        </div>
+        <canvas
+          ref={canvasRef}
+          className="orbit"
+          aria-label="Seven bodies on a diatonic wheel"
+        />
+        <ul className="tiles" role="list">
+          {TARGETS.map((body) => (
+            <li key={body.id}>
+              <PlanetTile
+                body={body}
+                armed={armed[body.id] ?? false}
+                flying={flying.has(body.id)}
+                onLaunch={() => onLaunch(body)}
+                onLongPress={() => setUpgradeFor(body)}
+              />
+            </li>
+          ))}
+        </ul>
+        {upgradeFor && (
+          <UpgradePanel body={upgradeFor} onClose={() => setUpgradeFor(null)} />
+        )}
+      </section>
+      {tab === 'harvest' && (
+        <HarvestStage
+          onTone={(d) => setTone((t) => t + d)}
+          onResonance={(d) => setResonance((r) => r + d)}
+        />
       )}
     </main>
   )
