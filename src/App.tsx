@@ -41,6 +41,20 @@ const UNLOCK_COSTS: Record<BodyId, { tone: number; resonance: number }> = {
 const AUTO_PLUCK_COST = { tone: 500, resonance: 350 }
 const AUTO_PLUCK_MIN_UNLOCKS = 3
 
+// Two infinite upgrades that compound: each level multiplies its yield by
+// YIELD_STEP, and the cost grows by COST_STEP. With YIELD < COST per level
+// the marginal value drops, but you can buy the other upgrade with the
+// currency you're flush in — so the player oscillates between the two and
+// Tone gain accelerates exponentially overall.
+const YIELD_STEP = 1.5
+const COST_STEP = 2
+const TONE_YIELD_BASE_COST = 5 // Resonance for level 1
+const RES_YIELD_BASE_COST = 8 // Tone for level 1
+
+const yieldMultiplier = (lvl: number) => YIELD_STEP ** lvl
+const toneYieldCost = (lvl: number) => Math.round(TONE_YIELD_BASE_COST * COST_STEP ** lvl)
+const resYieldCost = (lvl: number) => Math.round(RES_YIELD_BASE_COST * COST_STEP ** lvl)
+
 const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
 
@@ -82,7 +96,7 @@ function App() {
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
   const [audioOn, setAudioOn] = useState(false)
   const audioRef = useRef<OrbitAudio | null>(null)
-  const [tab, setTab] = useState<Tab>('orbits')
+  const [tab, setTab] = useState<Tab>('harvest')
   const [tone, setTone] = useState(0)
   const [resonance, setResonance] = useState(0)
   const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
@@ -92,6 +106,11 @@ function App() {
     return init
   })
   const [autoPluckUnlocked, setAutoPluckUnlocked] = useState(false)
+  const [toneYieldLvl, setToneYieldLvl] = useState(0)
+  const [resYieldLvl, setResYieldLvl] = useState(0)
+
+  const toneMul = yieldMultiplier(toneYieldLvl)
+  const resMul = yieldMultiplier(resYieldLvl)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
@@ -369,12 +388,18 @@ function App() {
     }
   }, [stopAudio])
 
-  const idleRate = computeIdleRate(slots)
+  const baseIdleRate = computeIdleRate(slots)
+  const idleRate = {
+    tonePerSec: baseIdleRate.tonePerSec * toneMul,
+    resonancePerSec: baseIdleRate.resonancePerSec * resMul,
+  }
 
   // Off-tab idle accrual. Only runs once auto-pluck is unlocked — before
   // that the Resonator is a manual game and there's no idle to accrue.
   // On-tab, auto-plucks credit Tone/Resonance directly via the existing
-  // callbacks; running the ticker too would double-count.
+  // callbacks; running the ticker too would double-count. The on-tap and
+  // off-tab paths share the same yield multipliers so progression stays
+  // consistent across tab switches.
   useEffect(() => {
     if (!autoPluckUnlocked) return
     if (tab === 'harvest') return
@@ -423,6 +448,20 @@ function App() {
     setResonance((r) => r - AUTO_PLUCK_COST.resonance)
     setAutoPluckUnlocked(true)
   }, [autoPluckUnlocked, unlockedIds.length, tone, resonance])
+
+  const buyToneYield = useCallback(() => {
+    const cost = toneYieldCost(toneYieldLvl)
+    if (resonance < cost) return
+    setResonance((r) => r - cost)
+    setToneYieldLvl((l) => l + 1)
+  }, [toneYieldLvl, resonance])
+
+  const buyResYield = useCallback(() => {
+    const cost = resYieldCost(resYieldLvl)
+    if (tone < cost) return
+    setTone((t) => t - cost)
+    setResYieldLvl((l) => l + 1)
+  }, [resYieldLvl, tone])
 
   // Next 1–2 ladder steps the player hasn't unlocked yet.
   const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
@@ -530,8 +569,8 @@ function App() {
             slots={slots}
             autoPluckUnlocked={autoPluckUnlocked}
             onSlotChange={handleSlotChange}
-            onTone={(d) => setTone((t) => t + d)}
-            onResonance={(d) => setResonance((r) => r + d)}
+            onTone={(d) => setTone((t) => t + d * toneMul)}
+            onResonance={(d) => setResonance((r) => r + d * resMul)}
           />
           <section className="resonator-progress" aria-label="Progression">
             {autoPluckUnlocked && (
@@ -546,6 +585,36 @@ function App() {
                 </span>
               </p>
             )}
+            <ul className="upgrades" role="list">
+              <li className="upgrade">
+                <div className="upgrade-info">
+                  <span className="upgrade-name">Tone yield</span>
+                  <span className="upgrade-stat">×{toneMul.toFixed(2)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="upgrade-btn"
+                  disabled={resonance < toneYieldCost(toneYieldLvl)}
+                  onClick={buyToneYield}
+                >
+                  ×{(toneMul * YIELD_STEP).toFixed(2)} · {toneYieldCost(toneYieldLvl)} Res
+                </button>
+              </li>
+              <li className="upgrade">
+                <div className="upgrade-info">
+                  <span className="upgrade-name">Resonance yield</span>
+                  <span className="upgrade-stat">×{resMul.toFixed(2)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="upgrade-btn"
+                  disabled={tone < resYieldCost(resYieldLvl)}
+                  onClick={buyResYield}
+                >
+                  ×{(resMul * YIELD_STEP).toFixed(2)} · {resYieldCost(resYieldLvl)} Tone
+                </button>
+              </li>
+            </ul>
             {(nextUnlocks.length > 0 || showAutoPluckUnlock) && (
               <ul className="unlocks" role="list">
                 {nextUnlocks.map((id, i) => {

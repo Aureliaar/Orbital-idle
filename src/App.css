@@ -711,6 +711,67 @@ main h1 {
   gap: 8px;
 }
 
+.upgrades {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.upgrade {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.upgrade-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upgrade-name {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.upgrade-stat {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.upgrade-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.upgrade-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.upgrade-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .unlock {
   display: flex;
   align-items: center;
