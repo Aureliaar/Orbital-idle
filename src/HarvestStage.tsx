@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
 import {
@@ -17,21 +17,23 @@ const TONIC_HZ = 261.63 / 2
 // H≥5; M2 (9:8) needs H≥8; M7 (15:8) needs H≥15. That's the unlock ladder.
 const HARMONIC_COUNT = 4
 
-// Visual decay time-constant: amp *= exp(-dt / TAU_VISUAL).
-const TAU_VISUAL_S = 2.0
-const AMP_FLOOR = 0.001
+// Single source of truth for "how long does a tap ring?" — visual partials
+// fade linearly to zero over this window, the pluck synth's envelope ends
+// at the same instant, and a tapped pad stays on cooldown for the same
+// duration. Anything else creates the visual-vs-audio mismatch.
+const RING_DURATION_S = 1.5
+const RING_DURATION_MS = RING_DURATION_S * 1000
 
 // Coincidence detection tolerance — 0.5% ≈ 8.6 cents. Just-intonation pairs
 // match exactly; the slack is forgiveness for future equal-temperament.
 const COINCIDENCE_TOL = 0.005
 
 // Tuned so a perfect-fifth coincidence (H3·H2 = 1/3·1/2 ≈ 0.167) tapped
-// within ~100ms gives ~5 Resonance.
+// near the start of the ring gives ~5 Resonance.
 const RESONANCE_GAIN = 32
 const TONE_PER_TAP = 1
 
 // Pluck synth envelope.
-const PLUCK_DECAY_S = 1.2
 const PLUCK_GAIN = 0.18
 const PLUCK_HIT_BOOST = 2.2
 
@@ -60,6 +62,8 @@ export function HarvestStage({ onTone, onResonance }: Props) {
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
   const nextBurstIdRef = useRef(1)
+  const coolingRef = useRef<Set<string>>(new Set())
+  const [cooling, setCooling] = useState<ReadonlySet<string>>(() => new Set())
   const onToneRef = useRef(onTone)
   const onResonanceRef = useRef(onResonance)
 
@@ -84,13 +88,15 @@ export function HarvestStage({ onTone, onResonance }: Props) {
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
 
-      const decayMul = Math.exp(-dt / TAU_VISUAL_S)
+      // Linear decay over RING_DURATION_S so visuals die at exactly the same
+      // instant the audio envelope ends. amp drops by (bornAmp / ring) per
+      // second; pruned the moment it crosses zero.
       const cloud = cloudRef.current
       let w = 0
       for (let i = 0; i < cloud.length; i++) {
         const h = cloud[i]
-        h.amp *= decayMul
-        if (h.amp >= AMP_FLOOR) cloud[w++] = h
+        h.amp -= h.bornAmp * (dt / RING_DURATION_S)
+        if (h.amp > 0) cloud[w++] = h
       }
       cloud.length = w
 
@@ -213,20 +219,24 @@ export function HarvestStage({ onTone, onResonance }: Props) {
   }, [])
 
   const handlePad = useCallback((pad: Pad) => {
+    // Cooldown blocks a pad until its prior pluck has fully decayed. This is
+    // both UX (no double-trigger spam) and a clean way to prevent same-note
+    // self-coincidence: when the cooldown ends, that pad's partials are at
+    // amp=0 and have been pruned, so there's nothing in the cloud to match.
+    if (coolingRef.current.has(pad.id)) return
+    coolingRef.current.add(pad.id)
+    setCooling(new Set(coolingRef.current))
+    window.setTimeout(() => {
+      if (coolingRef.current.delete(pad.id)) {
+        setCooling(new Set(coolingRef.current))
+      }
+    }, RING_DURATION_MS)
+
     const now = performance.now()
     const fund = TONIC_HZ * pad.ratio
     const incoming = harmonicSeries(fund, HARMONIC_COUNT, defaultAmp)
 
-    // Re-pluck: drop any prior partials from this same pad (a second pluck
-    // damps the first; without this, same-note spam would max-coincide).
     const cloud = cloudRef.current
-    let w = 0
-    for (let i = 0; i < cloud.length; i++) {
-      if (cloud[i].noteId !== pad.id) cloud[w++] = cloud[i]
-    }
-    cloud.length = w
-
-    // Scan against the (filtered) cloud BEFORE pushing this tap's partials.
     const { total, hits } = scanCoincidences(cloud, incoming, {
       tolFrac: COINCIDENCE_TOL,
       gain: RESONANCE_GAIN,
@@ -271,19 +281,25 @@ export function HarvestStage({ onTone, onResonance }: Props) {
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
       <ul className="pads" role="list">
-        {PADS.map((pad) => (
-          <li key={pad.id}>
-            <button
-              type="button"
-              className="pad"
-              onPointerDown={() => handlePad(pad)}
-              aria-label={`Play ${pad.label}`}
-            >
-              <span className="pad-note">{pad.label}</span>
-              <span className="pad-ratio">{pad.ratioLabel}</span>
-            </button>
-          </li>
-        ))}
+        {PADS.map((pad) => {
+          const isCooling = cooling.has(pad.id)
+          return (
+            <li key={pad.id}>
+              <button
+                type="button"
+                className={`pad${isCooling ? ' cooling' : ''}`}
+                onPointerDown={() => handlePad(pad)}
+                disabled={isCooling}
+                aria-label={`Play ${pad.label}`}
+                style={{ ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms` }}
+              >
+                <span className="pad-note">{pad.label}</span>
+                <span className="pad-ratio">{pad.ratioLabel}</span>
+                <span className="pad-cooldown" aria-hidden="true" />
+              </button>
+            </li>
+          )
+        })}
       </ul>
       <p className="harvest-hint">
         Tap a note for Tone. Tap a second note while the first is still ringing
@@ -304,7 +320,7 @@ function playPluck(
   const env = ctx.createGain()
   env.gain.setValueAtTime(0, t0)
   env.gain.linearRampToValueAtTime(PLUCK_GAIN, t0 + 0.005)
-  env.gain.exponentialRampToValueAtTime(0.0001, t0 + PLUCK_DECAY_S)
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + RING_DURATION_S)
   env.connect(filter)
 
   const boostedPartials = new Set<number>()
@@ -319,7 +335,7 @@ function playPluck(
     g.gain.value = h.amp * boost
     o.connect(g).connect(env)
     o.start(t0)
-    o.stop(t0 + PLUCK_DECAY_S + 0.05)
+    o.stop(t0 + RING_DURATION_S + 0.05)
   }
 
   // Disconnect the per-tap envelope after it has decayed so we don't pile up
@@ -332,7 +348,7 @@ function playPluck(
         // already disconnected (context closed) — ignore.
       }
     },
-    (PLUCK_DECAY_S + 0.2) * 1000,
+    (RING_DURATION_S + 0.2) * 1000,
   )
 }
 

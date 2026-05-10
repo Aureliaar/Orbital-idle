@@ -472,6 +472,8 @@ main h1 {
 }
 
 .pad {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -499,6 +501,30 @@ main h1 {
   border-color: var(--accent-border);
   color: var(--accent);
   transform: scale(0.97);
+}
+
+.pad:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pad-cooldown {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: var(--accent);
+  transform-origin: right;
+  transform: scaleX(0);
+  pointer-events: none;
+}
+
+.pad.cooling .pad-cooldown {
+  animation: pad-cooldown var(--cooldown-ms, 1500ms) linear forwards;
+}
+
+@keyframes pad-cooldown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
 }
 
 .pad-note {
