@@ -554,6 +554,26 @@ main h1 {
   color: var(--pad-color);
 }
 
+/* Stacked slot 0: render notes inline, each in its own diatonic color. */
+.pad-note-chord {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  font-size: 1.35rem;
+}
+
+.pad-note-sep {
+  margin: 0 4px;
+  color: var(--text);
+  opacity: 0.55;
+  font-weight: 400;
+}
+
+.pad.stack {
+  border-style: solid;
+  background: color-mix(in srgb, var(--pad-color) 4%, transparent);
+}
+
 .pad-ratio {
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -722,6 +742,28 @@ main h1 {
   margin-bottom: 2px;
   padding-bottom: 6px;
   color: var(--text);
+}
+
+.slot-picker-header {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.slot-picker-check {
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.unlock.unlock-stack {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-style: dashed;
+  grid-column: 1 / -1;
 }
 
 /* --- Progression: idle rate + unlock cards --- */

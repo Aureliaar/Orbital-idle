@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
 import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
 import { HarvestStage } from './HarvestStage'
-import { computeIdleRate, INITIAL_SLOT_COUNT, MAX_SLOT_COUNT } from './harvest-config'
+import {
+  computeIdleRate,
+  INITIAL_SLOT_COUNT,
+  MAX_SLOT0_CAPACITY,
+  MAX_SLOT_COUNT,
+} from './harvest-config'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
 
@@ -46,13 +51,20 @@ const autoPluckCost = (slotIdx: number) => ({
   resonance: Math.round(AUTO_PLUCK_BASE_COST.resonance * 1.6 ** slotIdx),
 })
 
-// Extra slots after the initial two. Slot 3 enables true 3-note resonance
-// (e.g. C+E+A all coincide at freq=5×TONIC, paying 2 pair-bonuses per tap
-// at that partial); slot 4 enables 4-note stacks. Each costs both
-// currencies and unlocks once the previous slot exists.
+// Third slot — costs both currencies, surfaces once the player has two
+// slots already.
 const SLOT_UNLOCK_COSTS: Record<number, { tone: number; resonance: number }> = {
   3: { tone: 80, resonance: 50 },
-  4: { tone: 250, resonance: 180 },
+}
+
+// Slot-0 capacity ladder: first pad can stack 1 → 2 → 3 notes. Stacked
+// notes fire together as a chord on every pad press, so cap 2 doubles
+// slot 0's tone yield AND lets later notes coincide against the first
+// note's freshly-emitted partials at full amplitude (no decay yet).
+// Costs are tuned so cap 2 is mid-game and cap 3 is a real grind.
+const SLOT0_CAPACITY_COSTS: Record<number, { tone: number; resonance: number }> = {
+  2: { tone: 150, resonance: 100 },
+  3: { tone: 600, resonance: 400 },
 }
 
 // Two infinite upgrades that compound: each level multiplies its yield by
@@ -115,14 +127,20 @@ function App() {
   const [resonance, setResonance] = useState(0)
   const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
   const [slotCount, setSlotCount] = useState(INITIAL_SLOT_COUNT)
-  const [slots, setSlots] = useState<(BodyId | null)[]>(() => {
-    const init: (BodyId | null)[] = Array(INITIAL_SLOT_COUNT).fill(null)
-    init[0] = 'C'
+  const [slots, setSlots] = useState<BodyId[][]>(() => {
+    const init: BodyId[][] = []
+    for (let i = 0; i < INITIAL_SLOT_COUNT; i++) init.push([])
+    init[0] = ['C']
     return init
   })
+  const [slot0Capacity, setSlot0Capacity] = useState(1)
   const [autoPluckSlots, setAutoPluckSlots] = useState<ReadonlySet<number>>(() => new Set())
   const [toneYieldLvl, setToneYieldLvl] = useState(0)
   const [resYieldLvl, setResYieldLvl] = useState(0)
+  const slotCapacities = useMemo(
+    () => Array.from({ length: slotCount }, (_, i) => (i === 0 ? slot0Capacity : 1)),
+    [slotCount, slot0Capacity],
+  )
 
   const toneMul = yieldMultiplier(toneYieldLvl)
   const resMul = yieldMultiplier(resYieldLvl)
@@ -431,18 +449,18 @@ function App() {
     return () => window.clearInterval(id)
   }, [tab, anyAutoPluck, idleRate.tonePerSec, idleRate.resonancePerSec])
 
-  const handleSlotChange = useCallback((slotIdx: number, noteId: BodyId | null) => {
+  const handleSlotChange = useCallback((slotIdx: number, newNotes: readonly BodyId[]) => {
     setSlots((prev) => {
-      const next = prev.slice()
-      // Same-note exclusion: if the chosen note already occupies another
-      // slot, clear that slot first. The picker also disables it but this
-      // is the safety net.
-      if (noteId !== null) {
+      const next = prev.map((s) => s.slice())
+      // Same-note exclusion: any note now in this slot must be removed from
+      // every other slot. The picker also enforces this but it's the
+      // safety net.
+      for (const note of newNotes) {
         for (let i = 0; i < next.length; i++) {
-          if (i !== slotIdx && next[i] === noteId) next[i] = null
+          if (i !== slotIdx) next[i] = next[i].filter((n) => n !== note)
         }
       }
-      next[slotIdx] = noteId
+      next[slotIdx] = newNotes.slice()
       return next
     })
   }, [])
@@ -480,8 +498,19 @@ function App() {
     setTone((t) => t - cost.tone)
     setResonance((r) => r - cost.resonance)
     setSlotCount((c) => c + 1)
-    setSlots((prev) => [...prev, null])
+    setSlots((prev) => [...prev, []])
   }, [slotCount, tone, resonance])
+
+  const handleUpgradeSlot0Capacity = useCallback(() => {
+    const nextCap = slot0Capacity + 1
+    if (nextCap > MAX_SLOT0_CAPACITY) return
+    const cost = SLOT0_CAPACITY_COSTS[nextCap]
+    if (!cost) return
+    if (tone < cost.tone || resonance < cost.resonance) return
+    setTone((t) => t - cost.tone)
+    setResonance((r) => r - cost.resonance)
+    setSlot0Capacity(nextCap)
+  }, [slot0Capacity, tone, resonance])
 
   const buyToneYield = useCallback(() => {
     const cost = toneYieldCost(toneYieldLvl)
@@ -503,6 +532,16 @@ function App() {
   const nextSlotIdx = slotCount + 1
   const nextSlotCost = SLOT_UNLOCK_COSTS[nextSlotIdx]
   const canAffordSlot = nextSlotCost ? tone >= nextSlotCost.tone && resonance >= nextSlotCost.resonance : false
+  // Slot 0 capacity upgrade — only show once the player has 2+ unlocked
+  // notes (otherwise stacking has nothing useful to put in the chord).
+  const nextSlot0Cap = slot0Capacity + 1
+  const slot0CapCost =
+    nextSlot0Cap <= MAX_SLOT0_CAPACITY && unlockedIds.length >= 2
+      ? SLOT0_CAPACITY_COSTS[nextSlot0Cap]
+      : undefined
+  const canAffordSlot0Cap = slot0CapCost
+    ? tone >= slot0CapCost.tone && resonance >= slot0CapCost.resonance
+    : false
   // Auto-pluck cards — one per existing slot that isn't auto-plucked yet.
   const autoPluckGate = unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
   const autoPluckSlotsToOffer = autoPluckGate
@@ -609,6 +648,7 @@ function App() {
             unlockedIds={unlockedIds}
             slots={slots}
             slotCount={slotCount}
+            slotCapacities={slotCapacities}
             autoPluckSlots={autoPluckSlots}
             onSlotChange={handleSlotChange}
             onTone={(d) => setTone((t) => t + d * toneMul)}
@@ -659,6 +699,7 @@ function App() {
             </ul>
             {(nextUnlocks.length > 0 ||
               nextSlotCost ||
+              slot0CapCost ||
               autoPluckSlotsToOffer.length > 0) && (
               <ul className="unlocks" role="list">
                 {nextUnlocks.map((id, i) => {
@@ -702,6 +743,29 @@ function App() {
                       onClick={handleUnlockSlot}
                     >
                       Unlock
+                    </button>
+                  </li>
+                )}
+                {slot0CapCost && (
+                  <li className="unlock unlock-stack">
+                    <div className="unlock-info">
+                      <span className="unlock-note">
+                        Slot 1 stack · {slot0Capacity} → {nextSlot0Cap} notes
+                      </span>
+                      <span className="unlock-cost">
+                        {slot0CapCost.tone} Tone · {slot0CapCost.resonance} Resonance
+                      </span>
+                      <span className="unlock-desc">
+                        play a chord on every tap
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="unlock-btn"
+                      disabled={!canAffordSlot0Cap}
+                      onClick={handleUpgradeSlot0Capacity}
+                    >
+                      Upgrade
                     </button>
                   </li>
                 )}

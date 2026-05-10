@@ -36,11 +36,16 @@ export const COINCIDENCE_TOL = 0.005
 export const RESONANCE_GAIN = 28
 export const TONE_PER_TAP = 1
 
-// Up to four assignable slots — start with two and unlock the rest. Each
-// can hold any unlocked note; the same note can't be in two slots (the
-// picker enforces it). Cooldown is keyed by slot index, not by note.
+// Up to three assignable slots — start with two and unlock the third.
+// Each slot can hold any unlocked note; the same note can't be in two
+// slots (the picker enforces it). Cooldown is keyed by slot index, not by
+// note. Slot 0 has its own capacity upgrade that lets it stack 2 or 3
+// notes inside a single pad — when fired, the stack plays as a chord and
+// later notes score coincidences against earlier-emitted partials, so a
+// 2-note stack pays the pair bonus on every tap.
 export const INITIAL_SLOT_COUNT = 2
-export const MAX_SLOT_COUNT = 4
+export const MAX_SLOT_COUNT = 3
+export const MAX_SLOT0_CAPACITY = 3
 
 // Auto-pluck is per-slot and carries a yield penalty: an auto-fired tap
 // pays this fraction of what a real tap would. Manual play stays the
@@ -62,41 +67,40 @@ export const PAD_COLORS: Record<string, string> = {
 // the same numbers via real auto-plucks; this function exists so off-tab
 // accrual matches without running React/canvas.
 //
-// Only slots whose index is in `autoSlots` contribute — manual-only slots
-// don't auto-fire, so they generate no idle income. Pair Resonance is only
-// counted when BOTH slots in the pair are auto-plucked (otherwise the
-// coincidence would require a manual tap that off-tab idle never sees).
-// Both Tone and Resonance are scaled by AUTO_PLUCK_PENALTY since every
-// tick is an auto-fired tap.
+// Each note in an auto-plucked slot is a virtual "fire participant" — a
+// stacked slot with N notes contributes N participants since they all fire
+// once per cadence. Tone scales linearly with participants. Resonance
+// counts every unordered pair of participants (across all auto-plucked
+// slots), which slightly under-counts the on-tap reality where stacked
+// notes coincide at FULL amplitude (no decay between same-cadence fires)
+// — so the on-tab rate will tend to be a touch higher than this estimate.
+// Manual-only slots don't auto-fire and don't contribute. Both Tone and
+// Resonance are scaled by AUTO_PLUCK_PENALTY since every tick is auto.
 export function computeIdleRate(
-  slots: ReadonlyArray<BodyId | null>,
+  slots: ReadonlyArray<ReadonlyArray<BodyId>>,
   autoSlots: ReadonlySet<number>,
 ): { tonePerSec: number; resonancePerSec: number } {
-  let autoFilled = 0
-  for (let i = 0; i < slots.length; i++) {
-    if (autoSlots.has(i) && slots[i]) autoFilled++
-  }
-  const tonePerSec = (autoFilled * TONE_PER_TAP * AUTO_PLUCK_PENALTY) / RING_DURATION_S
-
-  let resonancePerSec = 0
+  const autoNotes: BodyId[] = []
   for (let i = 0; i < slots.length; i++) {
     if (!autoSlots.has(i)) continue
-    const a = slots[i]
-    if (!a) continue
-    for (let j = i + 1; j < slots.length; j++) {
-      if (!autoSlots.has(j)) continue
-      const b = slots[j]
-      if (!b) continue
-      const ba = BODIES.find((x) => x.id === a)
-      const bb = BODIES.find((x) => x.id === b)
+    for (const n of slots[i]) autoNotes.push(n)
+  }
+  const tonePerSec = (autoNotes.length * TONE_PER_TAP * AUTO_PLUCK_PENALTY) / RING_DURATION_S
+
+  let resonancePerSec = 0
+  for (let i = 0; i < autoNotes.length; i++) {
+    for (let j = i + 1; j < autoNotes.length; j++) {
+      const ba = BODIES.find((x) => x.id === autoNotes[i])
+      const bb = BODIES.find((x) => x.id === autoNotes[j])
       if (!ba || !bb) continue
       const sa = harmonicSeries(TONIC_HZ * ba.ratio, HARMONIC_COUNT, defaultAmp)
       const sb = harmonicSeries(TONIC_HZ * bb.ratio, HARMONIC_COUNT, defaultAmp)
-      resonancePerSec += idlePairResonancePerSec(sa, sb, {
-        cadenceS: RING_DURATION_S,
-        gain: RESONANCE_GAIN,
-        tolFrac: COINCIDENCE_TOL,
-      }) * AUTO_PLUCK_PENALTY
+      resonancePerSec +=
+        idlePairResonancePerSec(sa, sb, {
+          cadenceS: RING_DURATION_S,
+          gain: RESONANCE_GAIN,
+          tolFrac: COINCIDENCE_TOL,
+        }) * AUTO_PLUCK_PENALTY
     }
   }
   return { tonePerSec, resonancePerSec }

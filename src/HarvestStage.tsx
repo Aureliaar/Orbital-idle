@@ -40,10 +40,11 @@ type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
 
 type Props = {
   unlockedIds: readonly BodyId[]
-  slots: ReadonlyArray<BodyId | null>
+  slots: ReadonlyArray<readonly BodyId[]>
   slotCount: number
+  slotCapacities: readonly number[]
   autoPluckSlots: ReadonlySet<number>
-  onSlotChange: (slotIdx: number, noteId: BodyId | null) => void
+  onSlotChange: (slotIdx: number, newNotes: readonly BodyId[]) => void
   onTone: (delta: number) => void
   onResonance: (delta: number) => void
 }
@@ -52,6 +53,7 @@ export function HarvestStage({
   unlockedIds,
   slots,
   slotCount,
+  slotCapacities,
   autoPluckSlots,
   onSlotChange,
   onTone,
@@ -153,21 +155,25 @@ export function HarvestStage({
       ctx2d.textBaseline = 'top'
 
       // Tick + letter for each currently-slotted note. Same-note exclusion
-      // means a note appears at most once.
+      // means a note appears at most once even across stacked slot 0.
       const slotsNow = slotsRef.current
-      for (const id of slotsNow) {
-        if (!id) continue
-        const body = BODIES.find((b) => b.id === id)
-        if (!body) continue
-        const x = xOf(TONIC_HZ * body.ratio)
-        const color = PAD_COLORS[id] ?? accent
-        ctx2d.strokeStyle = color
-        ctx2d.beginPath()
-        ctx2d.moveTo(x, baselineY)
-        ctx2d.lineTo(x, baselineY + 4)
-        ctx2d.stroke()
-        ctx2d.fillStyle = withAlpha(color, 0.85)
-        ctx2d.fillText(id, x, baselineY + 6)
+      const drawnNotes = new Set<BodyId>()
+      for (const slotNotes of slotsNow) {
+        for (const id of slotNotes) {
+          if (drawnNotes.has(id)) continue
+          drawnNotes.add(id)
+          const body = BODIES.find((b) => b.id === id)
+          if (!body) continue
+          const x = xOf(TONIC_HZ * body.ratio)
+          const color = PAD_COLORS[id] ?? accent
+          ctx2d.strokeStyle = color
+          ctx2d.beginPath()
+          ctx2d.moveTo(x, baselineY)
+          ctx2d.lineTo(x, baselineY + 4)
+          ctx2d.stroke()
+          ctx2d.fillStyle = withAlpha(color, 0.85)
+          ctx2d.fillText(id, x, baselineY + 6)
+        }
       }
 
       const stickMax = cssH - 38
@@ -256,14 +262,17 @@ export function HarvestStage({
   // identical regardless of who fired. Auto-fired plucks pay a yield
   // penalty (AUTO_PLUCK_PENALTY) on Tone + Resonance so manual play is
   // strictly better when the player is at the keyboard.
+  //
+  // A slot can hold a stack of notes (slot 0's capacity upgrade). The
+  // stack fires sequentially in array order — each note scans the cloud
+  // *after* the previous note's partials have been added to it, so a
+  // 2-note stack pays the chord's pair bonus on every tap at FULL
+  // amplitude (no decay between same-pluck emits).
   const handleSlot = useCallback((slotIdx: number, opts?: { auto?: boolean }) => {
     const slotsNow = slotsRef.current
-    const noteId = slotsNow[slotIdx]
-    if (!noteId) return
+    const notes = slotsNow[slotIdx]
+    if (!notes || notes.length === 0) return
     if (coolingRef.current.has(slotIdx)) return
-
-    const body = BODIES.find((b) => b.id === noteId)
-    if (!body) return
 
     coolingRef.current.add(slotIdx)
     setCooling(new Set(coolingRef.current))
@@ -273,50 +282,54 @@ export function HarvestStage({
       }
     }, RING_DURATION_MS)
 
-    const now = performance.now()
-    const fund = TONIC_HZ * body.ratio
-    const incoming = harmonicSeries(fund, HARMONIC_COUNT, defaultAmp)
-
-    const cloud = cloudRef.current
-    const { total, hits } = scanCoincidences(cloud, incoming, {
-      tolFrac: COINCIDENCE_TOL,
-      gain: RESONANCE_GAIN,
-    })
-
-    const yieldMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
-    onToneRef.current(TONE_PER_TAP * yieldMul)
-    if (total > 0) {
-      onResonanceRef.current(total * yieldMul)
-      for (const h of hits) {
-        burstsRef.current.push({
-          id: nextBurstIdRef.current++,
-          freq: h.freq,
-          bornMs: now,
-          magnitude: h.bonus,
-        })
-      }
-    }
-
-    // Audio: only play if the context has already been unlocked by a prior
-    // user gesture. Auto-plucks before the first manual tap stay silent
-    // (visuals + score still tick) — iOS Safari requires .resume() to come
-    // synchronously from a real gesture, so we never try here.
+    // Audio: only attempt to lazily create the context on a real user
+    // gesture. iOS Safari requires .resume() to come synchronously from a
+    // gesture, so auto-plucks never try.
     if (!opts?.auto && !audioRef.current) {
       const g = createAudioGraph({ lowpassHz: 4000, fadeInS: 0.05 })
       if (g) audioRef.current = g
     }
     const audio = audioRef.current
-    if (audio) playPluck(audio, incoming, hits)
 
-    for (const ih of incoming) {
-      cloud.push({
-        noteId: body.id,
-        partial: ih.partial,
-        freq: ih.freq,
-        amp: ih.amp,
-        bornAmp: ih.amp,
-        bornAt: now,
+    const yieldMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
+    const now = performance.now()
+    const cloud = cloudRef.current
+
+    for (const noteId of notes) {
+      const body = BODIES.find((b) => b.id === noteId)
+      if (!body) continue
+
+      const incoming = harmonicSeries(TONIC_HZ * body.ratio, HARMONIC_COUNT, defaultAmp)
+      const { total, hits } = scanCoincidences(cloud, incoming, {
+        tolFrac: COINCIDENCE_TOL,
+        gain: RESONANCE_GAIN,
       })
+
+      onToneRef.current(TONE_PER_TAP * yieldMul)
+      if (total > 0) {
+        onResonanceRef.current(total * yieldMul)
+        for (const h of hits) {
+          burstsRef.current.push({
+            id: nextBurstIdRef.current++,
+            freq: h.freq,
+            bornMs: now,
+            magnitude: h.bonus,
+          })
+        }
+      }
+
+      if (audio) playPluck(audio, incoming, hits)
+
+      for (const ih of incoming) {
+        cloud.push({
+          noteId: body.id,
+          partial: ih.partial,
+          freq: ih.freq,
+          amp: ih.amp,
+          bornAmp: ih.amp,
+          bornAt: now,
+        })
+      }
     }
   }, [])
 
@@ -386,9 +399,30 @@ export function HarvestStage({
     }
   }, [openPickerIdx])
 
-  const assignSlot = useCallback(
-    (slotIdx: number, noteId: BodyId | null) => {
-      onSlotChange(slotIdx, noteId)
+  // Picker click handler. Capacity-1 slots single-select replace and close;
+  // capacity-N slots toggle the note in/out and stay open for stacking.
+  const onPickerSelect = useCallback(
+    (slotIdx: number, noteId: BodyId) => {
+      const cap = slotCapacities[slotIdx] ?? 1
+      const current = slots[slotIdx] ?? []
+      const present = current.includes(noteId)
+      if (cap === 1) {
+        onSlotChange(slotIdx, present ? [] : [noteId])
+        setOpenPickerIdx(null)
+      } else {
+        if (present) {
+          onSlotChange(slotIdx, current.filter((n) => n !== noteId))
+        } else if (current.length < cap) {
+          onSlotChange(slotIdx, [...current, noteId])
+        }
+      }
+    },
+    [slots, slotCapacities, onSlotChange],
+  )
+
+  const onPickerClear = useCallback(
+    (slotIdx: number) => {
+      onSlotChange(slotIdx, [])
       setOpenPickerIdx(null)
     },
     [onSlotChange],
@@ -399,50 +433,64 @@ export function HarvestStage({
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
       <ul className="pads" role="list">
         {Array.from({ length: slotCount }, (_, idx) => {
-          const noteId = slots[idx] ?? null
-          const body = noteId ? BODIES.find((b) => b.id === noteId) ?? null : null
-          const color = body ? PAD_COLORS[body.id] : 'var(--border)'
+          const notes = slots[idx] ?? []
+          const cap = slotCapacities[idx] ?? 1
+          const firstBody = notes[0] ? BODIES.find((b) => b.id === notes[0]) ?? null : null
+          const color = firstBody ? PAD_COLORS[firstBody.id] : 'var(--border)'
+          const isEmpty = notes.length === 0
+          const isStack = cap > 1
           const isCooling = cooling.has(idx)
           const slotKey = SLOT_KEYS[idx]
           const pickerOpen = openPickerIdx === idx
           const isAuto = autoPluckSlots.has(idx)
           const onPadClick = () => {
-            if (!body) {
+            if (isEmpty) {
               setOpenPickerIdx(pickerOpen ? null : idx)
               return
             }
             handleSlot(idx)
           }
+          const padLabel = isEmpty
+            ? `Empty slot ${idx + 1} — tap to assign a note`
+            : `Play ${notes.join('+')} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
           return (
             <li key={idx} className="slot">
               <button
                 type="button"
-                className={`pad${isCooling ? ' cooling' : ''}${body ? '' : ' empty'}${isAuto ? ' auto' : ''}`}
+                className={`pad${isCooling ? ' cooling' : ''}${isEmpty ? ' empty' : ''}${isAuto ? ' auto' : ''}${isStack ? ' stack' : ''}`}
                 onPointerDown={onPadClick}
-                disabled={Boolean(body) && isCooling}
-                aria-label={
-                  body
-                    ? `Play ${body.id} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
-                    : `Empty slot ${idx + 1} — tap to assign a note`
-                }
+                disabled={!isEmpty && isCooling}
+                aria-label={padLabel}
                 style={{
                   ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
                   ['--pad-color' as string]: color,
                 }}
               >
                 <span className="pad-key" aria-hidden="true">{slotKey?.toUpperCase()}</span>
-                {isAuto && body && (
+                {isAuto && !isEmpty && (
                   <span className="pad-auto" aria-label="auto-pluck on" title="Auto-pluck on">⚡</span>
                 )}
-                {body ? (
-                  <>
-                    <span className="pad-note">{body.id}</span>
-                    <span className="pad-ratio">{toRatioLabel(body.ratio)}</span>
-                  </>
-                ) : (
+                {isEmpty ? (
                   <>
                     <span className="pad-note pad-note-empty" aria-hidden="true">+</span>
                     <span className="pad-ratio">add note</span>
+                  </>
+                ) : notes.length === 1 ? (
+                  <>
+                    <span className="pad-note">{notes[0]}</span>
+                    <span className="pad-ratio">{firstBody ? toRatioLabel(firstBody.ratio) : ''}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="pad-note pad-note-chord">
+                      {notes.map((n, i) => (
+                        <span key={n} style={{ color: PAD_COLORS[n] }}>
+                          {i > 0 ? <span className="pad-note-sep" aria-hidden="true">·</span> : null}
+                          {n}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="pad-ratio">chord · {notes.length}/{cap}</span>
                   </>
                 )}
                 <span className="pad-cooldown" aria-hidden="true" />
@@ -459,11 +507,16 @@ export function HarvestStage({
               </button>
               {pickerOpen && (
                 <div className="slot-picker" role="listbox" aria-label={`Slot ${idx + 1} note`}>
-                  {body && (
+                  {isStack && (
+                    <div className="slot-picker-header" aria-hidden="true">
+                      stack {notes.length}/{cap}
+                    </div>
+                  )}
+                  {!isEmpty && (
                     <button
                       type="button"
                       className="slot-picker-item slot-picker-clear"
-                      onClick={() => assignSlot(idx, null)}
+                      onClick={() => onPickerClear(idx)}
                     >
                       <span className="slot-picker-swatch" aria-hidden="true" />
                       <span className="slot-picker-label">clear</span>
@@ -471,17 +524,18 @@ export function HarvestStage({
                   )}
                   {BODIES.map((b) => {
                     if (!unlockedIds.includes(b.id)) return null
-                    const inOther = slots.some((s, i) => i !== idx && s === b.id)
-                    const isCurrent = body?.id === b.id
+                    const inOther = slots.some((s, i) => i !== idx && s.includes(b.id))
+                    const isHere = notes.includes(b.id)
+                    const atCap = !isHere && notes.length >= cap
                     return (
                       <button
                         key={b.id}
                         type="button"
                         role="option"
-                        aria-selected={isCurrent}
-                        className={`slot-picker-item${isCurrent ? ' on' : ''}`}
-                        disabled={inOther}
-                        onClick={() => assignSlot(idx, b.id)}
+                        aria-selected={isHere}
+                        className={`slot-picker-item${isHere ? ' on' : ''}`}
+                        disabled={inOther || atCap}
+                        onClick={() => onPickerSelect(idx, b.id)}
                       >
                         <span
                           className="slot-picker-swatch"
@@ -490,6 +544,9 @@ export function HarvestStage({
                         />
                         <span className="slot-picker-label">{b.id}</span>
                         <span className="slot-picker-ratio">{toRatioLabel(b.ratio)}</span>
+                        {isStack && isHere && (
+                          <span className="slot-picker-check" aria-hidden="true">✓</span>
+                        )}
                       </button>
                     )
                   })}
