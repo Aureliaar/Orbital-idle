@@ -104,6 +104,9 @@ function App() {
   )
   const launchRequestRef = useRef<BodyId | null>(null)
   const phaseRef = useRef<Map<BodyId, number>>(new Map())
+  // Mirror of `tab` for the canvas RAF closure (which captures initial values
+  // via empty-deps useEffect). Updated by the tab-suspend effect below.
+  const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -186,7 +189,7 @@ function App() {
 
       const a = audioRef.current
       const phases = phaseRef.current
-      const audioReady = !!a && a.graph.ctx.state === 'running'
+      const audioReady = !!a && a.graph.ctx.state === 'running' && tabRef.current === 'orbits'
       const strike = (voice: ToneVoice, velocity: number) => {
         if (!audioReady) return
         const v = Math.max(0, Math.min(1, velocity))
@@ -425,6 +428,27 @@ function App() {
       }
     }
   }, [audioOn, timbre, buildAudio, stopAudio, primePhases])
+
+  // Silence the orbital audio when off the Orbits tab: suspend the context
+  // (clean cut for in-flight piano tails) and let the strike gate skip new
+  // triggers. Returning to Orbits resumes and re-primes so the tonic chord
+  // fires on the next frame instead of after the longest body's full period.
+  useEffect(() => {
+    tabRef.current = tab
+    const audio = audioRef.current
+    if (!audio) return
+    const ctx = audio.graph.ctx
+    if (tab === 'orbits') {
+      if (ctx.state !== 'running') {
+        ctx
+          .resume()
+          .then(() => primePhases())
+          .catch(() => {})
+      }
+    } else if (ctx.state === 'running') {
+      void ctx.suspend().catch(() => {})
+    }
+  }, [tab, primePhases])
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
