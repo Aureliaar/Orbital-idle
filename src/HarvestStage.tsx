@@ -40,12 +40,20 @@ type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
 type Props = {
   unlockedIds: readonly BodyId[]
   slots: ReadonlyArray<BodyId | null>
+  autoPluckUnlocked: boolean
   onSlotChange: (slotIdx: number, noteId: BodyId | null) => void
   onTone: (delta: number) => void
   onResonance: (delta: number) => void
 }
 
-export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onResonance }: Props) {
+export function HarvestStage({
+  unlockedIds,
+  slots,
+  autoPluckUnlocked,
+  onSlotChange,
+  onTone,
+  onResonance,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
@@ -214,7 +222,7 @@ export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onReson
         ctx2d.textAlign = 'center'
         ctx2d.textBaseline = 'middle'
         ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('assign a note to a slot to start ringing', cssW / 2, cssH / 2)
+        ctx2d.fillText('tap a slot (A / S) to play', cssW / 2, cssH / 2)
         ctx2d.globalAlpha = 1
       }
 
@@ -304,8 +312,11 @@ export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onReson
 
   // Auto-pluck: each slot fires on a fixed cadence, staggered so the two
   // clouds overlap mid-life. Timers are slot-indexed, never note-indexed —
-  // so swapping a note into a slot doesn't reset the rhythm.
+  // so swapping a note into a slot doesn't reset the rhythm. Gated behind
+  // the auto-pluck unlock; until purchased, the Resonator is a manual
+  // rhythm game and no timers run.
   useEffect(() => {
+    if (!autoPluckUnlocked) return
     const timers: number[] = []
     const intervalIds: number[] = []
     for (let i = 0; i < SLOT_COUNT; i++) {
@@ -321,7 +332,7 @@ export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onReson
       for (const t of timers) window.clearTimeout(t)
       for (const id of intervalIds) window.clearInterval(id)
     }
-  }, [handleSlot])
+  }, [handleSlot, autoPluckUnlocked])
 
   // Keyboard bindings: A → slot 0, S → slot 1.
   useEffect(() => {
@@ -454,9 +465,9 @@ export function HarvestStage({ unlockedIds, slots, onSlotChange, onTone, onReson
         })}
       </ul>
       <p className="harvest-hint">
-        Slots auto-fire on a 1.5 s cadence. Tap (or press A/S) to pluck early.
-        Swap notes via the ▾ next to each slot — coincident partials pay
-        Resonance.
+        {autoPluckUnlocked
+          ? 'Slots auto-fire on a 1.5 s cadence. Tap (or press A/S) to pluck early. Swap notes via the ▾ — coincident partials pay Resonance.'
+          : 'Tap a slot (or press A/S) to play. Hit the second slot while the first is ringing — coincident partials pay Resonance.'}
       </p>
     </section>
   )

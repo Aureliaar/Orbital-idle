@@ -726,6 +726,19 @@ main h1 {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
+.unlock.unlock-auto {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-bg);
+  grid-column: 1 / -1;
+}
+
+.unlock-desc {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text);
+  opacity: 0.85;
+}
+
 .unlock-info {
   display: flex;
   flex-direction: column;

@@ -12,21 +12,34 @@ import { UpgradePanel } from './UpgradePanel'
 type Tab = 'orbits' | 'harvest'
 
 // Unlock order — chosen so the first purchase (E, M3 5:4) introduces a
-// small but real Resonance trickle via C+E coincidence, and the second (G,
-// P5 3:2) gives the canonical "fifth" jump (~4× the M3 rate). D and B
+// small but real Resonance trickle via C+E coincidence, and the second
+// (G, P5 3:2) gives the canonical "fifth" jump (~4× the M3 rate). D and B
 // remain low-coincidence with C alone but become useful once paired with
 // G or F. C is pre-unlocked; E costs Tone only (no way to earn Resonance
 // until a second note exists); all later unlocks cost both currencies.
+//
+// Costs are tuned for *manual* play: E after 3–5 hits of slot 1, G after
+// two correct C↔E combos (each combo = 2 taps → 2 Tone and 1 coincidence
+// ≈ 0.7–1.4 Resonance). The auto-pluck idle layer is gated behind a
+// separate, deliberately-late unlock so the early game stays a rhythm
+// puzzle and only turns into an idle clicker once you've earned it.
 const UNLOCK_LADDER: BodyId[] = ['C', 'E', 'G', 'F', 'A', 'D', 'B']
 const UNLOCK_COSTS: Record<BodyId, { tone: number; resonance: number }> = {
   C: { tone: 0, resonance: 0 },
-  E: { tone: 60, resonance: 0 },
-  G: { tone: 250, resonance: 8 },
-  F: { tone: 700, resonance: 40 },
-  A: { tone: 1800, resonance: 150 },
-  D: { tone: 4000, resonance: 500 },
-  B: { tone: 9000, resonance: 1500 },
+  E: { tone: 4, resonance: 0 },
+  G: { tone: 4, resonance: 2 },
+  F: { tone: 15, resonance: 10 },
+  A: { tone: 45, resonance: 30 },
+  D: { tone: 120, resonance: 90 },
+  B: { tone: 300, resonance: 220 },
 }
+
+// Auto-pluck — the moment the Resonator becomes an idle game. Until the
+// player buys this, every Tone/Resonance gain comes from a real tap.
+// Surfaces only after 3+ notes are unlocked so the player has felt the
+// manual combo loop first.
+const AUTO_PLUCK_COST = { tone: 500, resonance: 350 }
+const AUTO_PLUCK_MIN_UNLOCKS = 3
 
 const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
@@ -78,6 +91,7 @@ function App() {
     init[0] = 'C'
     return init
   })
+  const [autoPluckUnlocked, setAutoPluckUnlocked] = useState(false)
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
@@ -357,12 +371,12 @@ function App() {
 
   const idleRate = computeIdleRate(slots)
 
-  // Off-tab idle accrual. On the Resonator tab, auto-plucks credit
-  // Tone/Resonance directly via the existing callbacks — running the
-  // ticker too would double-count. Off-tab, drive the same per-second
-  // numbers analytically so progression doesn't stall when the player is
-  // looking at the orbits.
+  // Off-tab idle accrual. Only runs once auto-pluck is unlocked — before
+  // that the Resonator is a manual game and there's no idle to accrue.
+  // On-tab, auto-plucks credit Tone/Resonance directly via the existing
+  // callbacks; running the ticker too would double-count.
   useEffect(() => {
+    if (!autoPluckUnlocked) return
     if (tab === 'harvest') return
     if (idleRate.tonePerSec === 0 && idleRate.resonancePerSec === 0) return
     let last = performance.now()
@@ -374,7 +388,7 @@ function App() {
       if (idleRate.resonancePerSec > 0) setResonance((r) => r + idleRate.resonancePerSec * dt)
     }, 250)
     return () => window.clearInterval(id)
-  }, [tab, idleRate.tonePerSec, idleRate.resonancePerSec])
+  }, [tab, autoPluckUnlocked, idleRate.tonePerSec, idleRate.resonancePerSec])
 
   const handleSlotChange = useCallback((slotIdx: number, noteId: BodyId | null) => {
     setSlots((prev) => {
@@ -401,8 +415,19 @@ function App() {
     setUnlockedIds((prev) => [...prev, id])
   }, [unlockedIds, tone, resonance])
 
+  const handleUnlockAutoPluck = useCallback(() => {
+    if (autoPluckUnlocked) return
+    if (unlockedIds.length < AUTO_PLUCK_MIN_UNLOCKS) return
+    if (tone < AUTO_PLUCK_COST.tone || resonance < AUTO_PLUCK_COST.resonance) return
+    setTone((t) => t - AUTO_PLUCK_COST.tone)
+    setResonance((r) => r - AUTO_PLUCK_COST.resonance)
+    setAutoPluckUnlocked(true)
+  }, [autoPluckUnlocked, unlockedIds.length, tone, resonance])
+
   // Next 1–2 ladder steps the player hasn't unlocked yet.
   const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
+  const showAutoPluckUnlock = !autoPluckUnlocked && unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
+  const canAffordAutoPluck = tone >= AUTO_PLUCK_COST.tone && resonance >= AUTO_PLUCK_COST.resonance
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
@@ -503,22 +528,25 @@ function App() {
           <HarvestStage
             unlockedIds={unlockedIds}
             slots={slots}
+            autoPluckUnlocked={autoPluckUnlocked}
             onSlotChange={handleSlotChange}
             onTone={(d) => setTone((t) => t + d)}
             onResonance={(d) => setResonance((r) => r + d)}
           />
           <section className="resonator-progress" aria-label="Progression">
-            <p className="idle-rate">
-              Idle{' '}
-              <span>
-                <strong>{idleRate.resonancePerSec.toFixed(2)}</strong> res/s
-              </span>
-              {' · '}
-              <span>
-                <strong>{idleRate.tonePerSec.toFixed(2)}</strong> tone/s
-              </span>
-            </p>
-            {nextUnlocks.length > 0 && (
+            {autoPluckUnlocked && (
+              <p className="idle-rate">
+                Idle{' '}
+                <span>
+                  <strong>{idleRate.resonancePerSec.toFixed(2)}</strong> res/s
+                </span>
+                {' · '}
+                <span>
+                  <strong>{idleRate.tonePerSec.toFixed(2)}</strong> tone/s
+                </span>
+              </p>
+            )}
+            {(nextUnlocks.length > 0 || showAutoPluckUnlock) && (
               <ul className="unlocks" role="list">
                 {nextUnlocks.map((id, i) => {
                   const cost = UNLOCK_COSTS[id]
@@ -543,6 +571,25 @@ function App() {
                     </li>
                   )
                 })}
+                {showAutoPluckUnlock && (
+                  <li className="unlock unlock-auto">
+                    <div className="unlock-info">
+                      <span className="unlock-note">Auto-pluck</span>
+                      <span className="unlock-cost">
+                        {AUTO_PLUCK_COST.tone} Tone · {AUTO_PLUCK_COST.resonance} Resonance
+                      </span>
+                      <span className="unlock-desc">slots ring on their own</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="unlock-btn"
+                      disabled={!canAffordAutoPluck}
+                      onClick={handleUnlockAutoPluck}
+                    >
+                      Unlock
+                    </button>
+                  </li>
+                )}
               </ul>
             )}
           </section>
