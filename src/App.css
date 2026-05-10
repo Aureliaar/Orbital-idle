@@ -378,3 +378,191 @@ main h1 {
   width: 18px;
   height: 18px;
 }
+
+/* --- Tabs --- */
+
+.tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.tab:hover {
+  color: var(--text-h);
+}
+
+.tab.on {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* --- Currency readout --- */
+
+.currencies {
+  display: inline-flex;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+}
+
+.currencies > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.currencies dt {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin: 0;
+}
+
+.currencies dd {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+/* --- Harvest stage --- */
+
+.harvest {
+  width: min(720px, 96vw);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.spectrum {
+  width: 100%;
+  height: clamp(160px, 32vh, 260px);
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+}
+
+.pads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.pad {
+  --pad-color: var(--accent);
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 12px;
+  border: 1px solid color-mix(in srgb, var(--pad-color) 35%, var(--border));
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: border-color 100ms ease, background 100ms ease, transform 60ms ease;
+}
+
+.pad:hover {
+  border-color: var(--pad-color);
+}
+
+.pad:active {
+  background: color-mix(in srgb, var(--pad-color) 14%, transparent);
+  border-color: var(--pad-color);
+  transform: scale(0.97);
+}
+
+.pad:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pad-cooldown {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: var(--pad-color);
+  transform-origin: right;
+  transform: scaleX(0);
+  pointer-events: none;
+}
+
+.pad.cooling .pad-cooldown {
+  animation: pad-cooldown var(--cooldown-ms, 1500ms) linear forwards;
+}
+
+@keyframes pad-cooldown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+.pad-key {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: transparent;
+}
+
+.pad:active .pad-key,
+.pad.cooling .pad-key {
+  border-color: var(--pad-color);
+  color: var(--pad-color);
+}
+
+.pad-note {
+  font-family: var(--mono);
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--pad-color);
+}
+
+.pad-ratio {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.harvest-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text);
+  text-align: center;
+}
