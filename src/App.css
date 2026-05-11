@@ -585,6 +585,26 @@ main h1 {
   color: var(--pad-color);
 }
 
+/* Stacked slot 0: render notes inline, each in its own diatonic color. */
+.pad-note-chord {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  font-size: 1.35rem;
+}
+
+.pad-note-sep {
+  margin: 0 4px;
+  color: var(--text);
+  opacity: 0.55;
+  font-weight: 400;
+}
+
+.pad.stack {
+  border-style: solid;
+  background: color-mix(in srgb, var(--pad-color) 4%, transparent);
+}
+
 .pad-ratio {
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -596,4 +616,379 @@ main h1 {
   font-size: 0.78rem;
   color: var(--text);
   text-align: center;
+}
+
+/* --- Slot picker (▾ next to each pad) --- */
+
+.slot {
+  position: relative;
+}
+
+/* Empty pads READ as empty: dashed accent border, a giant "+" glyph, a
+   CTA that points at the picker toggle, and the toggle itself pulses to
+   show where to actually click. The pad button stays disabled — adding
+   notes is the picker's job, not the pad's. */
+.pad.empty {
+  --pad-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-style: dashed;
+  border-width: 2px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  animation: empty-pulse 2.4s ease-in-out infinite;
+  /* Disabled buttons get opacity 0.55 by default — override so the empty
+     visual stays vivid. The pad's non-interactive state is communicated
+     by the dashed border + lack of cooldown bar, not by dimming. */
+  cursor: default;
+}
+
+.pad.empty:disabled {
+  opacity: 1;
+}
+
+.pad-note-empty {
+  font-size: 3.8rem;
+  line-height: 0.95;
+  font-weight: 300;
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  margin-top: -2px;
+}
+
+.pad-empty-cta {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+@keyframes empty-pulse {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--accent) 75%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+/* Picker toggle gets a stronger pulse + accent skin while its slot is
+   empty, so the user's eye lands on the actual entry point for adding
+   notes (not the pad itself). */
+.slot-picker-toggle.attention {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: picker-attention 1.6s ease-in-out infinite;
+}
+
+@keyframes picker-attention {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent);
+    transform: scale(1.12);
+  }
+}
+
+.pad-auto {
+  position: absolute;
+  top: 6px;
+  right: 32px;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--pad-color);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.pad.auto {
+  background: color-mix(in srgb, var(--pad-color) 6%, transparent);
+}
+
+.slot-picker-toggle {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.slot-picker-toggle:hover,
+.slot-picker-toggle.open {
+  color: var(--text-h);
+  border-color: var(--text-h);
+}
+
+.slot-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.slot-picker-item {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+}
+
+.slot-picker-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-h) 6%, transparent);
+}
+
+.slot-picker-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.slot-picker-item.on {
+  background: color-mix(in srgb, var(--text-h) 4%, transparent);
+  font-weight: 600;
+}
+
+.slot-picker-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.slot-picker-label {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+.slot-picker-ratio {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.slot-picker-clear {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  padding-bottom: 6px;
+  color: var(--text);
+}
+
+.slot-picker-header {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.slot-picker-check {
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.unlock.unlock-stack {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-style: dashed;
+  grid-column: 1 / -1;
+}
+
+/* --- Progression: idle rate + unlock cards --- */
+
+.resonator-progress {
+  width: min(720px, 96vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.idle-rate {
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text);
+  font-family: var(--mono);
+}
+
+.idle-rate strong {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.unlocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+/* The two yield upgrades always share a row — they're a paired
+   compound-loop and reading them side-by-side makes that legible. */
+.upgrades {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.upgrade {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.upgrade-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upgrade-name {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.upgrade-stat {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.upgrade-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.upgrade-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.upgrade-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.unlock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.unlock.next {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.unlock.unlock-auto {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-bg);
+}
+
+.unlock.unlock-slot {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-style: dashed;
+  grid-column: 1 / -1;
+}
+
+.unlock-desc {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.unlock-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unlock-note {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.unlock-cost {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.unlock-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
+.unlock-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.unlock-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
