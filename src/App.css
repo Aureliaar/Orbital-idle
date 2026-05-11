@@ -489,7 +489,9 @@ main h1 {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: manipulation;
+  /* none, not manipulation: horizontal swipes are app gestures (cycle the
+     slot's note), so we don't want the browser stealing them for panning. */
+  touch-action: none;
   transition: border-color 100ms ease, background 100ms ease, transform 60ms ease;
 }
 

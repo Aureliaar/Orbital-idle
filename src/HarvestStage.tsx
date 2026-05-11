@@ -470,6 +470,37 @@ export function HarvestStage({
     [slots, slotCapacities, unlockedIds, onSlotChange],
   )
 
+  // Window-level pointerup so we resolve swipes regardless of where the
+  // finger/cursor releases. Trying to do this on the button itself relies
+  // on setPointerCapture, which is finicky across browsers and breaks if
+  // the button gets re-rendered (state change in pointerdown) mid-gesture.
+  useEffect(() => {
+    const onUp = (e: PointerEvent) => {
+      const g = gesturesRef.current.get(e.pointerId)
+      if (!g) return
+      gesturesRef.current.delete(e.pointerId)
+      const dx = e.clientX - g.startX
+      const dy = e.clientY - g.startY
+      const dt = performance.now() - g.startT
+      if (
+        Math.abs(dx) > 36 &&
+        Math.abs(dx) > Math.abs(dy) * 1.5 &&
+        dt < 700
+      ) {
+        cycleSlotNote(g.idx, dx > 0 ? 1 : -1)
+      }
+    }
+    const onCancel = (e: PointerEvent) => {
+      gesturesRef.current.delete(e.pointerId)
+    }
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    return () => {
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+  }, [cycleSlotNote])
+
   return (
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
@@ -497,13 +528,6 @@ export function HarvestStage({
                 type="button"
                 className={`pad${isCooling ? ' cooling' : ''}${isEmpty ? ' empty' : ''}${isAuto ? ' auto' : ''}${isStack ? ' stack' : ''}`}
                 onPointerDown={(e) => {
-                  try {
-                    e.currentTarget.setPointerCapture(e.pointerId)
-                  } catch {
-                    // older browsers: capture isn't critical for the gesture
-                    // to work; just less robust when the finger leaves the
-                    // button.
-                  }
                   gesturesRef.current.set(e.pointerId, {
                     idx,
                     startX: e.clientX,
@@ -511,23 +535,6 @@ export function HarvestStage({
                     startT: performance.now(),
                   })
                   if (!isEmpty && !isCooling) handleSlot(idx)
-                }}
-                onPointerUp={(e) => {
-                  const g = gesturesRef.current.get(e.pointerId)
-                  gesturesRef.current.delete(e.pointerId)
-                  if (!g) return
-                  const dx = e.clientX - g.startX
-                  const dy = e.clientY - g.startY
-                  const dt = performance.now() - g.startT
-                  const isSwipe =
-                    swipeable &&
-                    Math.abs(dx) > 36 &&
-                    Math.abs(dx) > Math.abs(dy) * 1.5 &&
-                    dt < 700
-                  if (isSwipe) cycleSlotNote(idx, dx > 0 ? 1 : -1)
-                }}
-                onPointerCancel={(e) => {
-                  gesturesRef.current.delete(e.pointerId)
                 }}
                 aria-label={padLabel}
                 style={{
