@@ -647,7 +647,9 @@ export function HarvestStage({
                   if (!unlockedIds.includes(b.id)) return null
                   const inOther = slots.some((s, i) => i !== idx && s.includes(b.id))
                   const isHere = notes.includes(b.id)
-                  const atCap = !isHere && notes.length >= cap
+                  // Only stack slots can be "full" — for cap-1 the picker
+                  // is a replace, so other notes must stay tappable.
+                  const atCap = isStack && !isHere && notes.length >= cap
                   return (
                     <button
                       key={b.id}
