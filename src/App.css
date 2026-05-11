@@ -503,9 +503,8 @@ main h1 {
   transform: scale(0.97);
 }
 
-.pad:disabled {
-  cursor: default;
-  opacity: 0.55;
+.pad.cooling {
+  opacity: 0.65;
 }
 
 .pad-cooldown {
@@ -607,10 +606,6 @@ main h1 {
      visual stays vivid. The pad's non-interactive state is communicated
      by the dashed border + lack of cooldown bar, not by dimming. */
   cursor: default;
-}
-
-.pad.empty:disabled {
-  opacity: 1;
 }
 
 .pad-note-empty {

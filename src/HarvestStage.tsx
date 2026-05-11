@@ -69,6 +69,12 @@ export function HarvestStage({
   const [openPickerIdx, setOpenPickerIdx] = useState<number | null>(null)
   const modalRef = useRef<HTMLDivElement | null>(null)
   const lastFocusRef = useRef<HTMLElement | null>(null)
+  // Pointer-id keyed so multi-touch can't cross-fire one finger's gesture
+  // with another's. Each entry is the in-flight swipe candidate for that
+  // pointer; resolved on pointerup/cancel.
+  const gesturesRef = useRef(
+    new Map<number, { idx: number; startX: number; startY: number; startT: number }>(),
+  )
   const slotsRef = useRef(slots)
   const autoSlotsRef = useRef(autoPluckSlots)
   const onToneRef = useRef(onTone)
@@ -431,6 +437,39 @@ export function HarvestStage({
     [onSlotChange],
   )
 
+  // Swipe handler: advance the slot's single note to the next/prev unlocked
+  // body that isn't already in another slot (same-note exclusion). Diatonic
+  // order from BODIES is the cycle order. Stack slots (cap > 1) opt out —
+  // they belong to the picker. Empty slots load the first/last available.
+  const cycleSlotNote = useCallback(
+    (slotIdx: number, dir: 1 | -1) => {
+      const cap = slotCapacities[slotIdx] ?? 1
+      if (cap > 1) return
+      const current = slots[slotIdx]?.[0] ?? null
+      const taken = new Set<BodyId>()
+      slots.forEach((s, i) => {
+        if (i === slotIdx) return
+        for (const id of s) taken.add(id)
+      })
+      const available = BODIES
+        .filter((b) => unlockedIds.includes(b.id) && !taken.has(b.id))
+        .map((b) => b.id)
+      if (available.length === 0) return
+      if (current === null) {
+        onSlotChange(slotIdx, [dir === 1 ? available[0] : available[available.length - 1]])
+        return
+      }
+      const i = available.indexOf(current)
+      if (i === -1) {
+        onSlotChange(slotIdx, [available[0]])
+        return
+      }
+      const next = available[(i + dir + available.length) % available.length]
+      onSlotChange(slotIdx, [next])
+    },
+    [slots, slotCapacities, unlockedIds, onSlotChange],
+  )
+
   return (
     <section className="harvest" aria-label="Resonator stage">
       <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
@@ -446,19 +485,50 @@ export function HarvestStage({
           const slotKey = SLOT_KEYS[idx]
           const pickerOpen = openPickerIdx === idx
           const isAuto = autoPluckSlots.has(idx)
+          const swipeable = !isStack
           const padLabel = isEmpty
-            ? `Empty slot ${idx + 1} — use the ▾ picker to add a note`
-            : `Play ${notes.join('+')} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
+            ? `Empty slot ${idx + 1} — swipe or use ▾ to pick a note`
+            : swipeable
+              ? `Play ${notes.join('+')} (slot ${idx + 1}, key ${slotKey?.toUpperCase()}) — swipe to change note`
+              : `Play ${notes.join('+')} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
           return (
             <li key={idx} className="slot">
               <button
                 type="button"
                 className={`pad${isCooling ? ' cooling' : ''}${isEmpty ? ' empty' : ''}${isAuto ? ' auto' : ''}${isStack ? ' stack' : ''}`}
-                onPointerDown={() => {
-                  if (isEmpty) return
-                  handleSlot(idx)
+                onPointerDown={(e) => {
+                  try {
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                  } catch {
+                    // older browsers: capture isn't critical for the gesture
+                    // to work; just less robust when the finger leaves the
+                    // button.
+                  }
+                  gesturesRef.current.set(e.pointerId, {
+                    idx,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    startT: performance.now(),
+                  })
+                  if (!isEmpty && !isCooling) handleSlot(idx)
                 }}
-                disabled={isEmpty || isCooling}
+                onPointerUp={(e) => {
+                  const g = gesturesRef.current.get(e.pointerId)
+                  gesturesRef.current.delete(e.pointerId)
+                  if (!g) return
+                  const dx = e.clientX - g.startX
+                  const dy = e.clientY - g.startY
+                  const dt = performance.now() - g.startT
+                  const isSwipe =
+                    swipeable &&
+                    Math.abs(dx) > 36 &&
+                    Math.abs(dx) > Math.abs(dy) * 1.5 &&
+                    dt < 700
+                  if (isSwipe) cycleSlotNote(idx, dx > 0 ? 1 : -1)
+                }}
+                onPointerCancel={(e) => {
+                  gesturesRef.current.delete(e.pointerId)
+                }}
                 aria-label={padLabel}
                 style={{
                   ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
@@ -472,7 +542,7 @@ export function HarvestStage({
                 {isEmpty ? (
                   <>
                     <span className="pad-note pad-note-empty" aria-hidden="true">+</span>
-                    <span className="pad-empty-cta">add a note via ▾</span>
+                    <span className="pad-empty-cta">swipe or tap ▾</span>
                   </>
                 ) : notes.length === 1 ? (
                   <>
@@ -598,8 +668,8 @@ export function HarvestStage({
         )
       })()}
       <p className="harvest-hint">
-        Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play. Hit
-        another while the first rings — coincident partials pay Resonance.
+        Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play; swipe
+        left/right to swap its note. Hit another while the first rings — coincident partials pay Resonance.
         Auto-plucked slots fire themselves at half yield (⚡).
       </p>
     </section>
