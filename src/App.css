@@ -548,6 +548,17 @@ main h1 {
   color: var(--pad-color);
 }
 
+/* On touch-primary devices there's no keyboard to hint at — hide the key
+   chip and reclaim its corner so the auto-pluck ⚡ slides flush. */
+@media (hover: none) and (pointer: coarse) {
+  .pad-key {
+    display: none;
+  }
+  .pad-auto {
+    right: 8px;
+  }
+}
+
 .pad-note {
   font-family: var(--mono);
   font-size: 1.6rem;
