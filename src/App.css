@@ -593,33 +593,40 @@ main h1 {
   position: relative;
 }
 
-/* Empty pads should READ as empty: dashed accent border that pulses, big
-   "+" instead of a note letter, and the whole pad is clickable as a
-   shortcut to open the picker. */
+/* Empty pads READ as empty: dashed accent border, a giant "+" glyph, a
+   CTA that points at the picker toggle, and the toggle itself pulses to
+   show where to actually click. The pad button stays disabled — adding
+   notes is the picker's job, not the pad's. */
 .pad.empty {
   --pad-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   border-style: dashed;
   border-width: 2px;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   animation: empty-pulse 2.4s ease-in-out infinite;
-  cursor: pointer;
+  /* Disabled buttons get opacity 0.55 by default — override so the empty
+     visual stays vivid. The pad's non-interactive state is communicated
+     by the dashed border + lack of cooldown bar, not by dimming. */
+  cursor: default;
 }
 
-.pad.empty:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.pad.empty:disabled {
+  opacity: 1;
 }
 
 .pad-note-empty {
-  font-size: 2.4rem;
-  line-height: 1;
-  color: color-mix(in srgb, var(--accent) 70%, var(--text));
-  opacity: 0.85;
+  font-size: 3.8rem;
+  line-height: 0.95;
+  font-weight: 300;
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  margin-top: -2px;
 }
 
-.pad.empty .pad-ratio {
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: color-mix(in srgb, var(--accent) 60%, var(--text));
+.pad-empty-cta {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
 }
 
 @keyframes empty-pulse {
@@ -630,6 +637,26 @@ main h1 {
   50% {
     border-color: color-mix(in srgb, var(--accent) 75%, var(--border));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+/* Picker toggle gets a stronger pulse + accent skin while its slot is
+   empty, so the user's eye lands on the actual entry point for adding
+   notes (not the pad itself). */
+.slot-picker-toggle.attention {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: picker-attention 1.6s ease-in-out infinite;
+}
+
+@keyframes picker-attention {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent);
+    transform: scale(1.12);
   }
 }
 

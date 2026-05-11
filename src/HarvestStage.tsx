@@ -443,23 +443,19 @@ export function HarvestStage({
           const slotKey = SLOT_KEYS[idx]
           const pickerOpen = openPickerIdx === idx
           const isAuto = autoPluckSlots.has(idx)
-          const onPadClick = () => {
-            if (isEmpty) {
-              setOpenPickerIdx(pickerOpen ? null : idx)
-              return
-            }
-            handleSlot(idx)
-          }
           const padLabel = isEmpty
-            ? `Empty slot ${idx + 1} — tap to assign a note`
+            ? `Empty slot ${idx + 1} — use the ▾ picker to add a note`
             : `Play ${notes.join('+')} (slot ${idx + 1}, key ${slotKey?.toUpperCase()})`
           return (
             <li key={idx} className="slot">
               <button
                 type="button"
                 className={`pad${isCooling ? ' cooling' : ''}${isEmpty ? ' empty' : ''}${isAuto ? ' auto' : ''}${isStack ? ' stack' : ''}`}
-                onPointerDown={onPadClick}
-                disabled={!isEmpty && isCooling}
+                onPointerDown={() => {
+                  if (isEmpty) return
+                  handleSlot(idx)
+                }}
+                disabled={isEmpty || isCooling}
                 aria-label={padLabel}
                 style={{
                   ['--cooldown-ms' as string]: `${RING_DURATION_MS}ms`,
@@ -473,7 +469,7 @@ export function HarvestStage({
                 {isEmpty ? (
                   <>
                     <span className="pad-note pad-note-empty" aria-hidden="true">+</span>
-                    <span className="pad-ratio">add note</span>
+                    <span className="pad-empty-cta">add a note via ▾</span>
                   </>
                 ) : notes.length === 1 ? (
                   <>
@@ -497,7 +493,7 @@ export function HarvestStage({
               </button>
               <button
                 type="button"
-                className={`slot-picker-toggle${pickerOpen ? ' open' : ''}`}
+                className={`slot-picker-toggle${pickerOpen ? ' open' : ''}${isEmpty ? ' attention' : ''}`}
                 onClick={() => setOpenPickerIdx(pickerOpen ? null : idx)}
                 aria-haspopup="listbox"
                 aria-expanded={pickerOpen}

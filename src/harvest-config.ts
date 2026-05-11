@@ -36,14 +36,16 @@ export const COINCIDENCE_TOL = 0.005
 export const RESONANCE_GAIN = 28
 export const TONE_PER_TAP = 1
 
-// Up to three assignable slots — start with two and unlock the third.
-// Each slot can hold any unlocked note; the same note can't be in two
-// slots (the picker enforces it). Cooldown is keyed by slot index, not by
-// note. Slot 0 has its own capacity upgrade that lets it stack 2 or 3
-// notes inside a single pad — when fired, the stack plays as a chord and
-// later notes score coincidences against earlier-emitted partials, so a
-// 2-note stack pays the pair bonus on every tap.
-export const INITIAL_SLOT_COUNT = 2
+// Up to three assignable slots — start with one and unlock the rest.
+// Slot 2 unlocks cheaply once E is bought (the first paired note needs
+// somewhere to go); slot 3 is later. Each slot can hold any unlocked
+// note; the same note can't be in two slots (the picker enforces it).
+// Cooldown is keyed by slot index, not by note. Slot 0 has its own
+// capacity upgrade that lets it stack 2 or 3 notes inside a single pad —
+// when fired, the stack plays as a chord and later notes score
+// coincidences against earlier-emitted partials, so a 2-note stack pays
+// the pair bonus on every tap.
+export const INITIAL_SLOT_COUNT = 1
 export const MAX_SLOT_COUNT = 3
 export const MAX_SLOT0_CAPACITY = 3
 

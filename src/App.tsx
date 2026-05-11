@@ -51,10 +51,16 @@ const autoPluckCost = (slotIdx: number) => ({
   resonance: Math.round(AUTO_PLUCK_BASE_COST.resonance * 1.6 ** slotIdx),
 })
 
-// Third slot — costs both currencies, surfaces once the player has two
-// slots already.
+// Slot unlock costs. Slot 2 is intentionally cheap and gated on having
+// E bought — the player needs somewhere to put their first paired note,
+// and gating it on E means the unlock card surfaces exactly when it's
+// useful. Slot 3 stays the mid-game gate that opens 3-note resonance.
 const SLOT_UNLOCK_COSTS: Record<number, { tone: number; resonance: number }> = {
+  2: { tone: 5, resonance: 0 },
   3: { tone: 80, resonance: 50 },
+}
+const SLOT_UNLOCK_GATES: Record<number, BodyId> = {
+  2: 'E',
 }
 
 // Slot-0 capacity ladder: first pad can stack 1 → 2 → 3 notes. Stacked
@@ -528,9 +534,12 @@ function App() {
 
   // Next 1–2 ladder steps the player hasn't unlocked yet.
   const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
-  // Slot unlock card — show once the previous slot exists.
+  // Slot unlock card — show once the previous slot exists AND the gating
+  // note (if any) is unlocked.
   const nextSlotIdx = slotCount + 1
-  const nextSlotCost = SLOT_UNLOCK_COSTS[nextSlotIdx]
+  const slotGate = SLOT_UNLOCK_GATES[nextSlotIdx]
+  const slotGatePassed = slotGate ? unlockedIds.includes(slotGate) : true
+  const nextSlotCost = slotGatePassed ? SLOT_UNLOCK_COSTS[nextSlotIdx] : undefined
   const canAffordSlot = nextSlotCost ? tone >= nextSlotCost.tone && resonance >= nextSlotCost.resonance : false
   // Slot 0 capacity upgrade — only show once the player has 2+ unlocked
   // notes (otherwise stacking has nothing useful to put in the chord).
@@ -726,14 +735,17 @@ function App() {
                   )
                 })}
                 {nextSlotCost && (
-                  <li className="unlock unlock-slot">
+                  <li className="unlock unlock-slot next">
                     <div className="unlock-info">
                       <span className="unlock-note">Slot {nextSlotIdx}</span>
                       <span className="unlock-cost">
-                        {nextSlotCost.tone} Tone · {nextSlotCost.resonance} Resonance
+                        {nextSlotCost.tone} Tone
+                        {nextSlotCost.resonance > 0 ? ` · ${nextSlotCost.resonance} Resonance` : ''}
                       </span>
                       <span className="unlock-desc">
-                        {nextSlotIdx === 3 ? '3-note resonance unlocks' : 'one more pad'}
+                        {nextSlotIdx === 2
+                          ? 'a home for your second note'
+                          : '3-note resonance unlocks'}
                       </span>
                     </div>
                     <button
