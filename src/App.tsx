@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AMSynth, Context, FMSynth, Panner, PluckSynth, setContext } from 'tone'
 import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
@@ -95,11 +96,10 @@ const HALO_PROXIMITY = 0.93
 // audible pitches: D3, E3, F3, G3, A3, B3.
 const EARTH_HZ = 261.63 / 2
 
-// Earth is the constant tonic drone. Each non-tonic voice peak-and-holds:
-// gain climbs toward a proximity-driven target with a slow attack, sighs
-// back if the window passes without a launch, and resolves sharply when
-// the player taps that body's tile.
-const EARTH_DRONE_GAIN = 0.025
+// Each body strikes once per orbital period. The "swell" envelope from the
+// proximity logic is sampled at strike time and becomes the note's velocity:
+// distant bodies tick quietly, alignments crescendo, a launch resolves and
+// drops the body back to a floor velocity.
 const VOICE_FLOOR_GAIN = 0.002
 const VOICE_PEAK_GAIN = 0.16
 const SWELL_ATTACK_TAU = 1.8
@@ -108,13 +108,54 @@ const SWELL_RELEASE_TAU = 0.55
 const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
 const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
 
+const STRIKE_FLOOR_VELOCITY = 0.08
+const EARTH_VELOCITY = 0.55
+const STRIKE_DURATION = '8n'
+
+const TIMBRES = ['pluck', 'piano', 'synth'] as const
+type Timbre = (typeof TIMBRES)[number]
+const TIMBRE_LABELS: Record<Timbre, string> = {
+  pluck: 'Pluck',
+  piano: 'Piano',
+  synth: 'Synth',
+}
+
 type Probe = { startMs: number }
 type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
+type ToneVoice = {
+  synth: PluckSynth | FMSynth | AMSynth
+  panner: Panner
+  freq: number
+}
 type OrbitAudio = {
   graph: AudioGraph
-  voices: Map<BodyId, GainNode>
-  stops: OscillatorNode[]
+  voices: Map<BodyId, ToneVoice>
+  earth: ToneVoice
+  timbre: Timbre
+}
+
+const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
+  if (timbre === 'pluck') {
+    return new PluckSynth({ attackNoise: 1, dampening: 4000, resonance: 0.92, release: 1 })
+  }
+  if (timbre === 'piano') {
+    return new FMSynth({
+      harmonicity: 2,
+      modulationIndex: 6,
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.003, decay: 1.6, sustain: 0, release: 0.6 },
+      modulation: { type: 'sine' },
+      modulationEnvelope: { attack: 0.003, decay: 0.5, sustain: 0, release: 0.4 },
+    })
+  }
+  return new AMSynth({
+    harmonicity: 2.5,
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.01, decay: 0.8, sustain: 0.05, release: 0.6 },
+    modulation: { type: 'square' },
+    modulationEnvelope: { attack: 0.05, decay: 0.4, sustain: 0, release: 0.3 },
+  })
 }
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
@@ -126,7 +167,11 @@ function App() {
   const [armed, setArmed] = useState<ArmedMap>({})
   const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
-  const [audioOn, setAudioOn] = useState(false)
+  const [audioOn, setAudioOn] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return !!(window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+  })
+  const [timbre, setTimbre] = useState<Timbre>('piano')
   const audioRef = useRef<OrbitAudio | null>(null)
   const [tab, setTab] = useState<Tab>('harvest')
   const [tone, setTone] = useState(0)
@@ -154,6 +199,10 @@ function App() {
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
   const launchRequestRef = useRef<BodyId | null>(null)
+  const phaseRef = useRef<Map<BodyId, number>>(new Map())
+  // Mirror of `tab` for the canvas RAF closure (which captures initial values
+  // via empty-deps useEffect). Updated by the tab-suspend effect below.
+  const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -192,11 +241,11 @@ function App() {
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
 
-      const earthAngle = (t / EARTH_PERIOD_S) * 2 * Math.PI
+      const earthAngle = ((t / EARTH_PERIOD_S) + EARTH.phase) * 2 * Math.PI
 
       const positions = ORBITS.map((body, i) => {
         const r = rMin + (rMax - rMin) * (i / (ORBITS.length - 1))
-        const angle = (t / periodOf(body)) * 2 * Math.PI
+        const angle = ((t / periodOf(body)) + body.phase) * 2 * Math.PI
         let delta = Math.abs(((earthAngle - angle) % (2 * Math.PI)))
         if (delta > Math.PI) delta = 2 * Math.PI - delta
         return { body, angle, r, delta }
@@ -235,12 +284,33 @@ function App() {
       }
 
       const a = audioRef.current
-      if (a) {
-        const tnow = a.graph.ctx.currentTime
-        for (const [id, voice] of a.voices) {
-          const s = swells.get(id)
-          if (!s) continue
-          voice.gain.setTargetAtTime(s.held, tnow, 0.04)
+      const phases = phaseRef.current
+      const audioReady = !!a && a.graph.ctx.state === 'running' && tabRef.current === 'orbits'
+      const strike = (voice: ToneVoice, velocity: number) => {
+        if (!audioReady) return
+        const v = Math.max(0, Math.min(1, velocity))
+        if (v < 0.001) return
+        voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
+      }
+      for (const { body } of positions) {
+        const phase = ((t / periodOf(body)) + body.phase) % 1
+        const last = phases.get(body.id)
+        phases.set(body.id, phase)
+        if (last === undefined) continue
+        const wrapped = phase < last
+        if (!wrapped) continue
+        if (!audioReady) continue
+        if (body.id === EARTH.id) {
+          strike(a!.earth, EARTH_VELOCITY)
+        } else {
+          const voice = a!.voices.get(body.id)
+          if (!voice) continue
+          const s = swells.get(body.id)
+          const norm = s
+            ? (s.held - VOICE_FLOOR_GAIN) / (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN)
+            : 0
+          const velocity = STRIKE_FLOOR_VELOCITY + Math.pow(Math.max(0, norm), 0.7) * (1 - STRIKE_FLOOR_VELOCITY)
+          strike(voice, velocity)
         }
       }
 
@@ -349,83 +419,136 @@ function App() {
   }, [])
 
   const stopAudio = useCallback((audio: OrbitAudio) => {
-    teardownAudioGraph(audio.graph, audio.stops)
+    const { graph, voices, earth } = audio
+    teardownAudioGraph(graph, [])
+    // Dispose Tone synths before the shared teardown disconnects this
+    // stage's master/filter. teardownAudioGraph disconnects at
+    // (fadeOutS + 0.15) * 1000 ms = 450 ms with the default 0.3 s fade;
+    // we dispose at 400 ms so the synths come down on a still-connected
+    // master. The AudioContext itself is shared and stays open.
+    window.setTimeout(() => {
+      for (const v of voices.values()) {
+        v.synth.dispose()
+        v.panner.dispose()
+      }
+      earth.synth.dispose()
+      earth.panner.dispose()
+    }, 400)
+  }, [])
+
+  const buildAudio = useCallback((nextTimbre: Timbre): OrbitAudio | null => {
+    const graph = createAudioGraph({ lowpassHz: 1500, fadeInS: 0.6 })
+    if (!graph) return null
+
+    setContext(new Context({ context: graph.ctx }))
+
+    const buildVoice = (hz: number, pan: number): ToneVoice => {
+      const synth = buildSynth(nextTimbre)
+      const panner = new Panner(pan)
+      synth.connect(panner)
+      // Bypass the shared low-pass: Tone synths shape their own timbres and
+      // the 1500 Hz filter would dampen FM piano partials. The filter still
+      // sits in the graph; we just don't route through it.
+      // Tone's connect accepts raw AudioNodes.
+      panner.connect(graph.master as unknown as AudioNode)
+      return { synth, panner, freq: hz }
+    }
+
+    const earth = buildVoice(EARTH_HZ, 0)
+    const voices = new Map<BodyId, ToneVoice>()
+    TARGETS.forEach((body, i) => {
+      const pan = -0.4 + (i / Math.max(1, TARGETS.length - 1)) * 0.8
+      const hz = EARTH_HZ * body.ratio
+      voices.set(body.id, buildVoice(hz, pan))
+    })
+
+    return { graph, voices, earth, timbre: nextTimbre }
   }, [])
 
   const handleSoundToggle = useCallback(() => {
-    const existing = audioRef.current
-    if (existing) {
-      audioRef.current = null
-      stopAudio(existing)
-      setAudioOn(false)
-      return
-    }
+    setAudioOn((on) => !on)
+  }, [])
 
-    const graph = createAudioGraph({ lowpassHz: 1500 })
-    if (!graph) return
-    const { ctx, filter } = graph
+  const handleTimbreChange = useCallback((next: Timbre) => {
+    setTimbre(next)
+  }, [])
 
-    const stops: OscillatorNode[] = []
-    const buildVoice = (hz: number, pan: number, baseGain: number, lfoHz: number) => {
-      const voice = ctx.createGain()
-      voice.gain.value = baseGain
-      const panner = ctx.createStereoPanner()
-      panner.pan.value = pan
-      voice.connect(panner).connect(filter)
+  // Prime phases just below 1 so the next frame detects a wrap and every body
+  // strikes a tonic chord immediately, rather than waiting up to a full period
+  // for its first natural wraparound.
+  const primePhases = useCallback(() => {
+    phaseRef.current.clear()
+    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
+  }, [])
 
-      const fund = ctx.createOscillator()
-      fund.type = 'sine'
-      fund.frequency.value = hz
-      const fg = ctx.createGain()
-      fg.gain.value = 1
-      fund.connect(fg).connect(voice)
-
-      const harm = ctx.createOscillator()
-      harm.type = 'sine'
-      harm.frequency.value = hz * 2
-      const hg = ctx.createGain()
-      hg.gain.value = 0.18
-      harm.connect(hg).connect(voice)
-
-      const lfo = ctx.createOscillator()
-      lfo.frequency.value = lfoHz
-      const ld = ctx.createGain()
-      ld.gain.value = hz * 0.0025
-      lfo.connect(ld)
-      ld.connect(fund.frequency)
-      ld.connect(harm.frequency)
-
-      fund.start()
-      harm.start()
-      lfo.start()
-      stops.push(fund, harm, lfo)
-      return voice
-    }
-
-    buildVoice(EARTH_HZ, 0, EARTH_DRONE_GAIN, 0.17)
-
-    const voices = new Map<BodyId, GainNode>()
-    TARGETS.forEach((body, i) => {
-      const pan = -0.4 + (i / Math.max(1, TARGETS.length - 1)) * 0.8
-      const lfoHz = 0.16 + i * 0.015
-      const hz = EARTH_HZ * body.ratio
-      const swell = swellsRef.current.get(body.id)
-      const base = swell ? swell.held : VOICE_FLOOR_GAIN
-      voices.set(body.id, buildVoice(hz, pan, base, lfoHz))
-    })
-
-    audioRef.current = { graph, voices, stops }
-    setAudioOn(true)
-  }, [stopAudio])
-
+  // Build / tear down the audio graph from state. Default-on means we attempt
+  // to construct it at mount; autoplay-blocking browsers leave the context
+  // suspended, so we also resume on the first user gesture and re-prime the
+  // strike phases so the very first audible frame fires the tonic chord.
   useEffect(() => {
-    return () => {
-      const audio = audioRef.current
-      if (!audio) return
-      audioRef.current = null
-      stopAudio(audio)
+    if (!audioOn) return
+    const audio = buildAudio(timbre)
+    if (!audio) return
+    audioRef.current = audio
+    primePhases()
+
+    let unlock: (() => void) | null = null
+    const removeUnlock = () => {
+      if (!unlock) return
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+      unlock = null
     }
-  }, [stopAudio])
+    if (audio.graph.ctx.state !== 'running') {
+      unlock = () => {
+        removeUnlock()
+        audio.graph.ctx
+          .resume()
+          .then(() => {
+            // Prime AFTER resume completes so the strike gate sees the
+            // primed phases on the next frame; priming synchronously would
+            // race the resume promise and be overwritten before audio is
+            // actually ready.
+            primePhases()
+          })
+          .catch(() => {})
+      }
+      window.addEventListener('pointerdown', unlock)
+      window.addEventListener('keydown', unlock)
+    }
+
+    return () => {
+      removeUnlock()
+      if (audioRef.current === audio) {
+        audioRef.current = null
+        stopAudio(audio)
+      }
+    }
+  }, [audioOn, timbre, buildAudio, stopAudio, primePhases])
+
+  // Silence the orbital audio when off the Orbits tab: ramp THIS stage's
+  // master to 0 — we can't suspend the AudioContext because it's shared
+  // with the Resonator, and suspending would kill harvest audio too. The
+  // strike gate (tab === 'orbits') still prevents new triggerAttackRelease
+  // calls; the gain ramp cuts the in-flight piano decay tails so the
+  // switch sounds clean. Returning to Orbits ramps back up and re-primes
+  // so the tonic chord lands on the next frame.
+  useEffect(() => {
+    tabRef.current = tab
+    const audio = audioRef.current
+    if (!audio) return
+    const master = audio.graph.master
+    const ctx = audio.graph.ctx
+    const t0 = ctx.currentTime
+    master.gain.cancelScheduledValues(t0)
+    master.gain.setValueAtTime(master.gain.value, t0)
+    if (tab === 'orbits') {
+      master.gain.linearRampToValueAtTime(1, t0 + 0.2)
+      primePhases()
+    } else {
+      master.gain.linearRampToValueAtTime(0, t0 + 0.05)
+    }
+  }, [tab, primePhases])
 
   const baseIdleRate = computeIdleRate(slots, autoPluckSlots)
   const idleRate = {
@@ -628,6 +751,20 @@ function App() {
               )}
             </svg>
           </button>
+          <div className="timbres" role="radiogroup" aria-label="Timbre">
+            {TIMBRES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="radio"
+                aria-checked={timbre === t}
+                className={`timbre${timbre === t ? ' on' : ''}`}
+                onClick={() => handleTimbreChange(t)}
+              >
+                {TIMBRE_LABELS[t]}
+              </button>
+            ))}
+          </div>
         </div>
         <canvas
           ref={canvasRef}
