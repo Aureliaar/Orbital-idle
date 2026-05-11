@@ -1,9 +1,20 @@
 // Shared AudioContext bootstrap for the orbital and harvest stages.
+//
 // iOS Safari only honors AudioContext.resume() called *synchronously* inside
 // the user gesture, and routes raw WebAudio through the "ambient" session
-// category which the silent switch mutes. Both stages need the same dance:
-// build the graph inside the click handler, route master through a
-// MediaStreamDestination + <audio playsinline> for the "playback" category.
+// category which the silent switch mutes. The fix on iOS is to pipe master
+// through a MediaStreamDestination + <audio playsinline> so playback uses
+// the "playback" session category. On desktop browsers the MediaStream
+// dance is unnecessary (and unreliable — the offscreen <audio> element's
+// `.play()` can reject silently outside a fresh user gesture, killing all
+// subsequent audio until something else re-primes it). So we detect iOS
+// and only use the MediaStream path there.
+//
+// We also keep ONE AudioContext per page (`sharedBoot`) — both the orbital
+// drone and the harvest plucks hang their own filter/master subgraph off
+// the same context. Multiple AudioContexts on one page are limited and
+// browsers can leave secondary contexts suspended, which was the root of
+// the "harvest audio doesn't work until you toggle orbital first" bug.
 
 export type AudioGraph = {
   ctx: AudioContext
@@ -13,11 +24,36 @@ export type AudioGraph = {
   audioEl: HTMLAudioElement | null
 }
 
-export function createAudioGraph(opts?: {
-  lowpassHz?: number
-  lowpassQ?: number
-  fadeInS?: number
-}): AudioGraph | null {
+type Boot = {
+  ctx: AudioContext
+  // Stage masters connect here — either the MediaStream sink (iOS) or
+  // ctx.destination (desktop).
+  output: AudioNode
+  audioEl: HTMLAudioElement | null
+}
+
+let sharedBoot: Boot | null = null
+
+function isIOSLike(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent
+  if (/iPad|iPhone|iPod/.test(ua)) return true
+  // iPadOS 13+ reports as MacIntel; the touch points heuristic distinguishes
+  // it from a real Mac.
+  return navigator.platform === 'MacIntel' && (navigator.maxTouchPoints ?? 0) > 1
+}
+
+function getOrCreateBoot(): Boot | null {
+  if (sharedBoot) {
+    // Make sure the context and audio element are awake — re-toggling audio
+    // or remounting a stage shouldn't leave the boot in a paused state.
+    void sharedBoot.ctx.resume()
+    if (sharedBoot.audioEl && sharedBoot.audioEl.paused) {
+      void sharedBoot.audioEl.play().catch(() => {})
+    }
+    return sharedBoot
+  }
+
   const Ctor =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -31,31 +67,57 @@ export function createAudioGraph(opts?: {
   unlock.connect(ctx.destination)
   unlock.start(0)
 
+  let output: AudioNode = ctx.destination
+  let audioEl: HTMLAudioElement | null = null
+  if (isIOSLike()) {
+    try {
+      const streamDest = ctx.createMediaStreamDestination()
+      audioEl = document.createElement('audio')
+      audioEl.setAttribute('playsinline', '')
+      audioEl.autoplay = true
+      audioEl.srcObject = streamDest.stream
+      audioEl.style.display = 'none'
+      // Keep it in the DOM so some browsers don't GC it / drop the stream.
+      document.body.appendChild(audioEl)
+      void audioEl.play().catch(() => {})
+      output = streamDest
+    } catch {
+      // Fall through to ctx.destination.
+      audioEl = null
+      output = ctx.destination
+    }
+  }
+
+  sharedBoot = { ctx, output, audioEl }
+  return sharedBoot
+}
+
+export function createAudioGraph(opts?: {
+  lowpassHz?: number
+  lowpassQ?: number
+  fadeInS?: number
+}): AudioGraph | null {
+  const boot = getOrCreateBoot()
+  if (!boot) return null
+  const { ctx, output } = boot
+  const t0 = ctx.currentTime
+
   const master = ctx.createGain()
-  master.gain.value = 0
-  master.gain.linearRampToValueAtTime(1, ctx.currentTime + (opts?.fadeInS ?? 0.6))
+  // Anchor the start value with an explicit setValueAtTime so the ramp
+  // computes from a defined point — `.value = 0` doesn't create an
+  // automation event and the linearRamp can behave oddly on a freshly
+  // resumed context.
+  master.gain.setValueAtTime(0, t0)
+  master.gain.linearRampToValueAtTime(1, t0 + (opts?.fadeInS ?? 0.6))
 
   const filter = ctx.createBiquadFilter()
   filter.type = 'lowpass'
   filter.frequency.value = opts?.lowpassHz ?? 1500
   filter.Q.value = opts?.lowpassQ ?? 0.5
   filter.connect(master)
+  master.connect(output)
 
-  let audioEl: HTMLAudioElement | null
-  try {
-    const streamDest = ctx.createMediaStreamDestination()
-    master.connect(streamDest)
-    audioEl = document.createElement('audio')
-    audioEl.setAttribute('playsinline', '')
-    audioEl.autoplay = true
-    audioEl.srcObject = streamDest.stream
-    void audioEl.play()
-  } catch {
-    audioEl = null
-    master.connect(ctx.destination)
-  }
-
-  return { ctx, filter, master, audioEl }
+  return { ctx, filter, master, audioEl: boot.audioEl }
 }
 
 export function teardownAudioGraph(
@@ -63,17 +125,25 @@ export function teardownAudioGraph(
   stops: OscillatorNode[],
   fadeOutS = 0.3,
 ): void {
-  const { ctx, master, audioEl } = graph
+  const { ctx, master, filter } = graph
   const tnow = ctx.currentTime
   master.gain.cancelScheduledValues(tnow)
   master.gain.setValueAtTime(master.gain.value, tnow)
   master.gain.linearRampToValueAtTime(0, tnow + fadeOutS)
   for (const o of stops) o.stop(tnow + fadeOutS + 0.05)
+  // Disconnect just this stage's subgraph — the shared boot (ctx + audio
+  // element) lives for the page so the next stage to come online doesn't
+  // need to re-bootstrap audio.
   window.setTimeout(() => {
-    if (audioEl) {
-      audioEl.pause()
-      audioEl.srcObject = null
+    try {
+      master.disconnect()
+    } catch {
+      // already disconnected
     }
-    void ctx.close()
+    try {
+      filter.disconnect()
+    } catch {
+      // already disconnected
+    }
   }, (fadeOutS + 0.15) * 1000)
 }

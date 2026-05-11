@@ -99,3 +99,30 @@ export function scanCoincidences(
   }
   return { total, hits }
 }
+
+// Per-pair idle Resonance rate. The auto-pluck loop staggers slots by half a
+// cadence so when slot B fires, slot A's cloud is half-decayed and vice-versa
+// — we model that by scanning B's incoming series against A's series at half
+// amplitude (`cloudAmpFrac = 0.5`). Each slot fires once per cadence, so the
+// scan total counts twice per cadence period (once per direction). Pure
+// function so on-tab auto-pluck income and off-tab analytic accrual stay in
+// sync.
+export function idlePairResonancePerSec(
+  seriesA: Array<{ partial: number; freq: number; amp: number }>,
+  seriesB: Array<{ partial: number; freq: number; amp: number }>,
+  opts: { cadenceS: number; gain: number; tolFrac?: number; cloudAmpFrac?: number },
+): number {
+  const cloudAmpFrac = opts.cloudAmpFrac ?? 0.5
+  const tol = opts.tolFrac ?? 0.005
+  const aAsCloud: Harmonic[] = seriesA.map((h) => ({
+    noteId: '_a',
+    partial: h.partial,
+    freq: h.freq,
+    amp: h.amp * cloudAmpFrac,
+    bornAmp: h.amp,
+    bornAt: 0,
+  }))
+  const { total } = scanCoincidences(aAsCloud, seriesB, { tolFrac: tol, gain: opts.gain })
+  // total = bonus from one cross-pluck. Both directions fire each cadence.
+  return (2 * total) / opts.cadenceS
+}
