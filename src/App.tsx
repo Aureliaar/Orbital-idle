@@ -676,36 +676,6 @@ function App() {
                 </span>
               </p>
             )}
-            <ul className="upgrades" role="list">
-              <li className="upgrade">
-                <div className="upgrade-info">
-                  <span className="upgrade-name">Tone yield</span>
-                  <span className="upgrade-stat">×{toneMul.toFixed(2)}</span>
-                </div>
-                <button
-                  type="button"
-                  className="upgrade-btn"
-                  disabled={resonance < toneYieldCost(toneYieldLvl)}
-                  onClick={buyToneYield}
-                >
-                  ×{(toneMul * YIELD_STEP).toFixed(2)} · {toneYieldCost(toneYieldLvl)} Res
-                </button>
-              </li>
-              <li className="upgrade">
-                <div className="upgrade-info">
-                  <span className="upgrade-name">Resonance yield</span>
-                  <span className="upgrade-stat">×{resMul.toFixed(2)}</span>
-                </div>
-                <button
-                  type="button"
-                  className="upgrade-btn"
-                  disabled={tone < resYieldCost(resYieldLvl)}
-                  onClick={buyResYield}
-                >
-                  ×{(resMul * YIELD_STEP).toFixed(2)} · {resYieldCost(resYieldLvl)} Tone
-                </button>
-              </li>
-            </ul>
             {(nextUnlocks.length > 0 ||
               nextSlotCost ||
               slot0CapCost ||
@@ -806,6 +776,36 @@ function App() {
                 })}
               </ul>
             )}
+            <ul className="upgrades" role="list">
+              <li className="upgrade">
+                <div className="upgrade-info">
+                  <span className="upgrade-name">Tone yield</span>
+                  <span className="upgrade-stat">×{toneMul.toFixed(2)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="upgrade-btn"
+                  disabled={resonance < toneYieldCost(toneYieldLvl)}
+                  onClick={buyToneYield}
+                >
+                  ×{(toneMul * YIELD_STEP).toFixed(2)} · {toneYieldCost(toneYieldLvl)} Res
+                </button>
+              </li>
+              <li className="upgrade">
+                <div className="upgrade-info">
+                  <span className="upgrade-name">Resonance yield</span>
+                  <span className="upgrade-stat">×{resMul.toFixed(2)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="upgrade-btn"
+                  disabled={tone < resYieldCost(resYieldLvl)}
+                  onClick={buyResYield}
+                >
+                  ×{(resMul * YIELD_STEP).toFixed(2)} · {resYieldCost(resYieldLvl)} Tone
+                </button>
+              </li>
+            </ul>
           </section>
         </>
       )}

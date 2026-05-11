@@ -825,12 +825,14 @@ main h1 {
   gap: 8px;
 }
 
+/* The two yield upgrades always share a row — they're a paired
+   compound-loop and reading them side-by-side makes that legible. */
 .upgrades {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
