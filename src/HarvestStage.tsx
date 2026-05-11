@@ -67,6 +67,8 @@ export function HarvestStage({
   const coolingRef = useRef<Set<number>>(new Set())
   const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
   const [openPickerIdx, setOpenPickerIdx] = useState<number | null>(null)
+  const modalRef = useRef<HTMLDivElement | null>(null)
+  const lastFocusRef = useRef<HTMLElement | null>(null)
   const slotsRef = useRef(slots)
   const autoSlotsRef = useRef(autoPluckSlots)
   const onToneRef = useRef(onTone)
@@ -379,23 +381,24 @@ export function HarvestStage({
     return () => window.removeEventListener('keydown', onKey)
   }, [handleSlot, slotCount])
 
-  // Click-outside / Escape closes any open picker.
+  // While the picker modal is open: lock body scroll, trap initial focus on
+  // the dialog, restore focus to the trigger on close, and let Escape close.
+  // The backdrop handles click-outside, so no document-level pointer listener
+  // is needed.
   useEffect(() => {
     if (openPickerIdx === null) return
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as HTMLElement | null
-      if (!t) return
-      if (t.closest('.slot-picker') || t.closest('.slot-picker-toggle')) return
-      setOpenPickerIdx(null)
-    }
+    lastFocusRef.current = document.activeElement as HTMLElement | null
+    modalRef.current?.focus()
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpenPickerIdx(null)
     }
-    window.addEventListener('pointerdown', onDown)
     window.addEventListener('keydown', onKey)
     return () => {
-      window.removeEventListener('pointerdown', onDown)
       window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+      lastFocusRef.current?.focus?.()
     }
   }, [openPickerIdx])
 
@@ -494,64 +497,106 @@ export function HarvestStage({
               <button
                 type="button"
                 className={`slot-picker-toggle${pickerOpen ? ' open' : ''}${isEmpty ? ' attention' : ''}`}
-                onClick={() => setOpenPickerIdx(pickerOpen ? null : idx)}
-                aria-haspopup="listbox"
+                onClick={() => setOpenPickerIdx(idx)}
+                aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
                 aria-label={`Choose note for slot ${idx + 1}`}
               >
                 <span aria-hidden="true">▾</span>
               </button>
-              {pickerOpen && (
-                <div className="slot-picker" role="listbox" aria-label={`Slot ${idx + 1} note`}>
-                  {isStack && (
-                    <div className="slot-picker-header" aria-hidden="true">
-                      stack {notes.length}/{cap}
-                    </div>
-                  )}
-                  {!isEmpty && (
-                    <button
-                      type="button"
-                      className="slot-picker-item slot-picker-clear"
-                      onClick={() => onPickerClear(idx)}
-                    >
-                      <span className="slot-picker-swatch" aria-hidden="true" />
-                      <span className="slot-picker-label">clear</span>
-                    </button>
-                  )}
-                  {BODIES.map((b) => {
-                    if (!unlockedIds.includes(b.id)) return null
-                    const inOther = slots.some((s, i) => i !== idx && s.includes(b.id))
-                    const isHere = notes.includes(b.id)
-                    const atCap = !isHere && notes.length >= cap
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isHere}
-                        className={`slot-picker-item${isHere ? ' on' : ''}`}
-                        disabled={inOther || atCap}
-                        onClick={() => onPickerSelect(idx, b.id)}
-                      >
-                        <span
-                          className="slot-picker-swatch"
-                          aria-hidden="true"
-                          style={{ background: PAD_COLORS[b.id] }}
-                        />
-                        <span className="slot-picker-label">{b.id}</span>
-                        <span className="slot-picker-ratio">{toRatioLabel(b.ratio)}</span>
-                        {isStack && isHere && (
-                          <span className="slot-picker-check" aria-hidden="true">✓</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
             </li>
           )
         })}
       </ul>
+      {openPickerIdx !== null && (() => {
+        const idx = openPickerIdx
+        const notes = slots[idx] ?? []
+        const cap = slotCapacities[idx] ?? 1
+        const isEmpty = notes.length === 0
+        const isStack = cap > 1
+        const titleId = `slot-picker-title-${idx}`
+        const subtitle = isStack
+          ? `chord ${notes.length}/${cap}`
+          : 'pick a note'
+        return (
+          <div
+            className="slot-picker-backdrop"
+            role="presentation"
+            onPointerDown={(e) => {
+              if (e.target === e.currentTarget) setOpenPickerIdx(null)
+            }}
+          >
+            <div
+              ref={modalRef}
+              className="slot-picker-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              tabIndex={-1}
+            >
+              <header className="slot-picker-header">
+                <span id={titleId} className="slot-picker-title">
+                  Slot {idx + 1} <span className="slot-picker-subtitle">· {subtitle}</span>
+                </span>
+                <button
+                  type="button"
+                  className="slot-picker-close"
+                  onClick={() => setOpenPickerIdx(null)}
+                  aria-label="Close note picker"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </header>
+              <div
+                className="slot-picker-list"
+                role="listbox"
+                aria-label={`Slot ${idx + 1} note`}
+              >
+                {!isEmpty && (
+                  <button
+                    type="button"
+                    className="slot-picker-item slot-picker-clear"
+                    onClick={() => onPickerClear(idx)}
+                  >
+                    <span className="slot-picker-swatch" aria-hidden="true" />
+                    <span className="slot-picker-label">clear</span>
+                    <span className="slot-picker-ratio" />
+                    <span className="slot-picker-check" aria-hidden="true" />
+                  </button>
+                )}
+                {BODIES.map((b) => {
+                  if (!unlockedIds.includes(b.id)) return null
+                  const inOther = slots.some((s, i) => i !== idx && s.includes(b.id))
+                  const isHere = notes.includes(b.id)
+                  const atCap = !isHere && notes.length >= cap
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isHere}
+                      className={`slot-picker-item${isHere ? ' on' : ''}`}
+                      disabled={inOther || atCap}
+                      onClick={() => onPickerSelect(idx, b.id)}
+                    >
+                      <span
+                        className="slot-picker-swatch"
+                        aria-hidden="true"
+                        style={{ background: PAD_COLORS[b.id] }}
+                      />
+                      <span className="slot-picker-label">{b.id}</span>
+                      <span className="slot-picker-ratio">{toRatioLabel(b.ratio)}</span>
+                      <span className="slot-picker-check" aria-hidden="true">
+                        {isHere ? '✓' : ''}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       <p className="harvest-hint">
         Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play. Hit
         another while the first rings — coincident partials pay Resonance.
