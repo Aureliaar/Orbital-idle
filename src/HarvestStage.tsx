@@ -408,15 +408,17 @@ export function HarvestStage({
     }
   }, [openPickerIdx])
 
-  // Picker click handler. Capacity-1 slots single-select replace and close;
-  // capacity-N slots toggle the note in/out and stay open for stacking.
+  // Picker click handler. Capacity-1 slots single-select replace and close
+  // — re-tapping the active note is a no-op (clearing is the explicit clear
+  // button's job). Capacity-N slots toggle the note in/out and stay open
+  // for stacking.
   const onPickerSelect = useCallback(
     (slotIdx: number, noteId: BodyId) => {
       const cap = slotCapacities[slotIdx] ?? 1
       const current = slots[slotIdx] ?? []
       const present = current.includes(noteId)
       if (cap === 1) {
-        onSlotChange(slotIdx, present ? [] : [noteId])
+        if (!present) onSlotChange(slotIdx, [noteId])
         setOpenPickerIdx(null)
       } else {
         if (present) {
