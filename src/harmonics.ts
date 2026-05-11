@@ -36,6 +36,12 @@ export type Harmonic = {
   bornAmp: number
   // performance.now() at emission, ms.
   bornAt: number
+  // Visual phase at emission, radians. The orbital visualizer advances each
+  // partial's angle by ω·age where ω is proportional to freq, so partials
+  // emitted together from one pluck spawn on a single radial spoke and fan
+  // out as the higher partials lap the lower ones. Optional because the
+  // off-tab analytic accrual constructs throwaway Harmonics without it.
+  startAngle?: number
 }
 
 // Build the harmonic series for a tap of `fundamentalHz`, using `model` to
