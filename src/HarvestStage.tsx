@@ -36,29 +36,31 @@ const SLOT_KEYS = ['a', 's', 'd', 'f']
 const AUTO_CADENCE_MS = RING_DURATION_MS
 const AUTO_STAGGER_MS = RING_DURATION_MS / 2
 
-// Orbital visualizer tuning. Angular speed scales with frequency relative to
-// the tonic; one revolution of the tonic fundamental takes VISUAL_REF_PERIOD_S
-// seconds, so C·H6 laps it 6× faster, B·H6 ≈ 11.25× faster. Coincident
-// partials (same freq) share an orbit AND an angular speed — they stay
-// locked at whatever offset they were born with.
-const VISUAL_REF_FREQ_HZ = TONIC_HZ
-const VISUAL_REF_PERIOD_S = 6
-// Each slot fires from a fixed home angle around the orbit, so the player
-// reads which slot a streak of partials came from. -π/2 puts slot 0 at the
-// top; subsequent slots step clockwise around the circle.
-const slotHomeAngle = (slotIdx: number) =>
-  -Math.PI / 2 + (slotIdx / MAX_SLOT_COUNT) * 2 * Math.PI
+// Pitch-helix visualizer math. A frequency `f` maps to pitch `p =
+// log2(f/tonic)` (octaves above tonic), and from there to a polar position:
+//   radius = r₀ + (rMax − r₀) · (p / P_MAX)         — climbs one ring per octave
+//   angle  = ((p mod 1) · 2π) − π/2                 — chroma; C sits at top
+// Because every frequency lands on a single (r, θ), coincident partials
+// (e.g. C·H3 and G·H2 at 392 Hz) overlap as the same dot — coincidence is
+// literal visual overlap, no rotating chord needed. P_MAX is the pitch of
+// the highest reachable partial (B·H_HARMONIC_COUNT) so the outermost ring
+// always lines up with the ladder's ceiling.
+const P_MAX = Math.log2((15 / 8) * HARMONIC_COUNT)
+
+const pitchOf = (freq: number) => Math.log2(freq / TONIC_HZ)
+const chromaAngleOf = (freq: number) => {
+  const p = pitchOf(freq)
+  const frac = ((p % 1) + 1) % 1
+  return frac * 2 * Math.PI - Math.PI / 2
+}
 
 type Burst = {
   id: number
   freq: number
   bornMs: number
   magnitude: number
-  // Angles (radians) of the incoming and cloud partials at the moment of
-  // coincidence. Both advance at the same ω at draw time (same freq → same
-  // orbit), so the chord drawn between them rotates rigidly with the orbit.
-  angleIn: number
-  angleCloud: number
+  // Both coincident partials land on the same dot, so a burst only needs
+  // the participating note colors for the blend halo.
   colorIn: string
   colorCloud: string
 }
@@ -110,12 +112,11 @@ export function HarvestStage({
     autoSlotsRef.current = autoPluckSlots
   }, [autoPluckSlots])
 
-  // rAF: decay cloud + bursts, redraw orbital plot. Each partial is a dot on
-  // a circle whose radius is set by its frequency (high freq = inner, slow
-  // outer drone = outer), and whose angle advances at ω ∝ freq. Two
-  // coincident partials (e.g. C·H3 and G·H2) sit on the SAME orbit and turn
-  // at the SAME ω, so a coincidence chord drawn between them rotates rigidly
-  // — a literal mean-motion resonance.
+  // rAF: decay cloud + bursts, redraw the pitch helix. Position is fully
+  // determined by frequency — angle is the pitch's chroma (octave fraction),
+  // radius is the pitch's octave (log2(f/tonic)). Two partials with the same
+  // frequency overlap as the literal same dot, which is the whole point of
+  // the coincidence mechanic.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -124,13 +125,6 @@ export function HarvestStage({
 
     let raf = 0
     let last = performance.now()
-
-    // Radius scale is fixed across the full diatonic ladder so orbits don't
-    // shift as the player unlocks more notes.
-    const maxRatio = BODIES.reduce((m, b) => (b.ratio > m ? b.ratio : m), 1)
-    const fMin = TONIC_HZ * 0.95
-    const fMax = TONIC_HZ * maxRatio * HARMONIC_COUNT * 1.05
-    const logSpan = Math.log(fMax / fMin)
 
     const draw = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000)
@@ -169,60 +163,74 @@ export function HarvestStage({
 
       const cx = cssW / 2
       const cy = cssH / 2
-      const rMax = Math.max(20, Math.min(cssW, cssH) / 2 - 18)
-      const rMin = Math.min(18, rMax - 4)
-
-      // High freq → small radius (fast inner orbit). Low freq → large radius
-      // (slow outer drone), matching Kepler's third law.
-      const radiusOf = (f: number) => {
-        const u = logSpan > 0 ? Math.log(f / fMin) / logSpan : 0
-        return rMax - (rMax - rMin) * Math.max(0, Math.min(1, u))
-      }
-      const angleOf = (freq: number, ageS: number, startAngle: number) => {
-        const omega = ((2 * Math.PI) / VISUAL_REF_PERIOD_S) * (freq / VISUAL_REF_FREQ_HZ)
-        return startAngle + omega * ageS
+      const rOuter = Math.max(40, Math.min(cssW, cssH) / 2 - 22)
+      // Fundamentals (p < 1) live on the base ring; the outer ring sits at
+      // p = P_MAX. Reserve a chunk of the disk for the base ring so the 7
+      // diatonic chroma dots have room to read.
+      const rBase = Math.max(28, rOuter * 0.26)
+      const radiusOf = (freq: number) => {
+        const p = Math.max(0, pitchOf(freq))
+        return rBase + (rOuter - rBase) * Math.min(1, p / P_MAX)
       }
 
-      // Faint guide ring + radial label for each currently-slotted note's
-      // fundamental, so the player can read where each note "lives".
+      // Octave guide rings at p = 1, 2, 3 — the points where C/D/E/.../B
+      // wrap back to the same chroma, one octave higher.
+      ctx2d.strokeStyle = withAlpha(border, 0.45)
+      ctx2d.lineWidth = 1
+      ctx2d.setLineDash([2, 5])
+      for (let oct = 1; oct <= Math.floor(P_MAX); oct++) {
+        const r = rBase + (rOuter - rBase) * (oct / P_MAX)
+        ctx2d.beginPath()
+        ctx2d.arc(cx, cy, r, 0, 2 * Math.PI)
+        ctx2d.stroke()
+      }
+      ctx2d.setLineDash([])
+      // Solid base ring — the home of all fundamentals.
+      ctx2d.strokeStyle = withAlpha(border, 0.7)
+      ctx2d.beginPath()
+      ctx2d.arc(cx, cy, rBase, 0, 2 * Math.PI)
+      ctx2d.stroke()
+
+      // Chroma compass: every diatonic note marked at its chroma angle on
+      // the base ring. Slotted notes glow in their pad color; the rest sit
+      // as faint anchors so the player can read pitch geometry before
+      // plucking anything.
       const slotsNow = slotsRef.current
-      const drawnNotes = new Set<BodyId>()
-      ctx2d.font = '10px ui-monospace, Menlo, Consolas, monospace'
-      ctx2d.textAlign = 'left'
+      const slotted = new Set<BodyId>()
+      for (const slotNotes of slotsNow) for (const id of slotNotes) slotted.add(id)
+      ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
+      ctx2d.textAlign = 'center'
       ctx2d.textBaseline = 'middle'
-      for (const slotNotes of slotsNow) {
-        for (const id of slotNotes) {
-          if (drawnNotes.has(id)) continue
-          drawnNotes.add(id)
-          const body = BODIES.find((b) => b.id === id)
-          if (!body) continue
-          const r = radiusOf(TONIC_HZ * body.ratio)
-          const color = PAD_COLORS[id] ?? accent
-          ctx2d.strokeStyle = withAlpha(color, 0.18)
-          ctx2d.lineWidth = 1
-          ctx2d.setLineDash([2, 4])
-          ctx2d.beginPath()
-          ctx2d.arc(cx, cy, r, 0, 2 * Math.PI)
-          ctx2d.stroke()
-          ctx2d.setLineDash([])
-          ctx2d.fillStyle = withAlpha(color, 0.55)
-          ctx2d.fillText(id, cx + r + 4, cy)
-        }
+      for (const body of BODIES) {
+        const f = TONIC_HZ * body.ratio
+        const ang = chromaAngleOf(f)
+        const x = cx + rBase * Math.cos(ang)
+        const y = cy + rBase * Math.sin(ang)
+        const isOn = slotted.has(body.id)
+        const color = PAD_COLORS[body.id] ?? accent
+        ctx2d.fillStyle = withAlpha(color, isOn ? 0.35 : 0.18)
+        ctx2d.beginPath()
+        ctx2d.arc(x, y, isOn ? 4 : 2.5, 0, 2 * Math.PI)
+        ctx2d.fill()
+        // Letter just outside the base ring.
+        const lx = cx + (rBase + 12) * Math.cos(ang)
+        const ly = cy + (rBase + 12) * Math.sin(ang)
+        ctx2d.fillStyle = withAlpha(color, isOn ? 0.95 : 0.45)
+        ctx2d.fillText(body.id, lx, ly)
       }
 
-      // Tonic anchor — a faint dot at the centre so the empty stage still
-      // reads as a system, not a void.
+      // Tonic anchor at the centre.
       ctx2d.fillStyle = withAlpha(border, 0.6)
       ctx2d.beginPath()
       ctx2d.arc(cx, cy, 2, 0, 2 * Math.PI)
       ctx2d.fill()
 
-      // Cloud partials as dots. Higher partials are smaller and dimmer;
-      // fundamentals get an outline + note letter so the slot's "voice" is
-      // legible at a glance even when its harmonics fan out.
+      // Cloud partials. Higher partials are smaller; fundamentals get an
+      // outline so the slot's "voice" stays legible. Drawn additive-ish
+      // (no special blend, but alpha-stacked dots naturally brighten where
+      // partials overlap — i.e. at coincidences).
       for (const h of cloud) {
-        const ageS = Math.max(0, (now - h.bornAt) / 1000)
-        const ang = angleOf(h.freq, ageS, h.startAngle ?? 0)
+        const ang = chromaAngleOf(h.freq)
         const r = radiusOf(h.freq)
         const x = cx + r * Math.cos(ang)
         const y = cy + r * Math.sin(ang)
@@ -230,71 +238,44 @@ export function HarvestStage({
         const opacity = Math.max(0.15, norm)
         const color = PAD_COLORS[h.noteId] ?? accent
         const isFund = h.partial === 1
-        const dotR = isFund ? 5.5 : Math.max(1.4, 4 / h.partial)
+        const dotR = isFund ? 6 : Math.max(1.6, 4.5 / h.partial)
 
-        ctx2d.fillStyle = withAlpha(color, opacity * (isFund ? 1 : 0.75))
+        ctx2d.fillStyle = withAlpha(color, opacity * (isFund ? 1 : 0.8))
         ctx2d.beginPath()
         ctx2d.arc(x, y, dotR, 0, 2 * Math.PI)
         ctx2d.fill()
 
         if (isFund) {
-          ctx2d.strokeStyle = withAlpha(color, opacity * 0.85)
+          ctx2d.strokeStyle = withAlpha(color, opacity * 0.9)
           ctx2d.lineWidth = 1.25
           ctx2d.beginPath()
           ctx2d.arc(x, y, dotR + 2.5, 0, 2 * Math.PI)
           ctx2d.stroke()
-
-          ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
-          ctx2d.textAlign = 'center'
-          ctx2d.textBaseline = 'middle'
-          // Push the letter outward along the radial so it doesn't sit on
-          // top of the dot when orbits crowd near the centre.
-          const lx = cx + (r + 11) * Math.cos(ang)
-          const ly = cy + (r + 11) * Math.sin(ang)
-          ctx2d.fillStyle = withAlpha(color, opacity)
-          ctx2d.fillText(h.noteId, lx, ly)
         }
       }
 
-      // Coincidence chord: a line between the two partials that locked.
-      // Both ride the same orbit at the same ω so the chord rotates rigidly
-      // — visually the resonance.
+      // Coincidence flashes. Both partials overlap at the same (r, θ), so
+      // we just pulse a glowing halo there in the blended color of the two
+      // contributing notes.
       for (const b of bursts) {
-        const ageBS = Math.max(0, (now - b.bornMs) / 1000)
         const u = (now - b.bornMs) / BURST_MS
+        const ang = chromaAngleOf(b.freq)
         const r = radiusOf(b.freq)
-        const omega = ((2 * Math.PI) / VISUAL_REF_PERIOD_S) * (b.freq / VISUAL_REF_FREQ_HZ)
-        const a1 = b.angleIn + omega * ageBS
-        const a2 = b.angleCloud + omega * ageBS
-        const x1 = cx + r * Math.cos(a1)
-        const y1 = cy + r * Math.sin(a1)
-        const x2 = cx + r * Math.cos(a2)
-        const y2 = cy + r * Math.sin(a2)
+        const x = cx + r * Math.cos(ang)
+        const y = cy + r * Math.sin(ang)
         const alpha = (1 - u) * 0.9
         const blended = blendColors(b.colorIn, b.colorCloud, 0.5)
-        const ringR = 5 + 22 * u * Math.min(1, b.magnitude * 4)
+        const haloR = 6 + 22 * u * Math.min(1, b.magnitude * 4)
 
-        ctx2d.strokeStyle = withAlpha(blended, alpha * 0.7)
+        ctx2d.fillStyle = withAlpha(blended, alpha * 0.3)
+        ctx2d.beginPath()
+        ctx2d.arc(x, y, haloR, 0, 2 * Math.PI)
+        ctx2d.fill()
+        ctx2d.strokeStyle = withAlpha(blended, alpha)
         ctx2d.lineWidth = 1.5
         ctx2d.beginPath()
-        ctx2d.moveTo(x1, y1)
-        ctx2d.lineTo(x2, y2)
+        ctx2d.arc(x, y, haloR, 0, 2 * Math.PI)
         ctx2d.stroke()
-
-        for (const [bx, by, bc] of [
-          [x1, y1, b.colorIn] as const,
-          [x2, y2, b.colorCloud] as const,
-        ]) {
-          ctx2d.fillStyle = withAlpha(bc, alpha * 0.35)
-          ctx2d.beginPath()
-          ctx2d.arc(bx, by, ringR, 0, 2 * Math.PI)
-          ctx2d.fill()
-          ctx2d.strokeStyle = withAlpha(bc, alpha)
-          ctx2d.lineWidth = 1.5
-          ctx2d.beginPath()
-          ctx2d.arc(bx, by, ringR, 0, 2 * Math.PI)
-          ctx2d.stroke()
-        }
       }
 
       if (cloud.length === 0 && bursts.length === 0) {
@@ -303,7 +284,7 @@ export function HarvestStage({
         ctx2d.textAlign = 'center'
         ctx2d.textBaseline = 'middle'
         ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('tap a slot to play', cx, Math.min(cssH - 12, cy + rMax + 16))
+        ctx2d.fillText('tap a slot to play', cx, Math.min(cssH - 12, cy + rOuter + 16))
         ctx2d.globalAlpha = 1
       }
 
@@ -362,7 +343,6 @@ export function HarvestStage({
     const yieldMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
     const now = performance.now()
     const cloud = cloudRef.current
-    const startAngle = slotHomeAngle(slotIdx)
 
     for (const noteId of notes) {
       const body = BODIES.find((b) => b.id === noteId)
@@ -379,25 +359,11 @@ export function HarvestStage({
       if (total > 0) {
         onResonanceRef.current(total * yieldMul)
         for (const h of hits) {
-          // Cloud partial's current angle: ω·age + its own startAngle.
-          // The incoming partial is brand new, so its angle is the slot's
-          // home angle.
-          const cloudEntry = cloud.find(
-            (c) => c.noteId === h.cloudNoteId && c.partial === h.cloudPartial,
-          )
-          const omega =
-            ((2 * Math.PI) / VISUAL_REF_PERIOD_S) * (h.freq / VISUAL_REF_FREQ_HZ)
-          const cloudAge = cloudEntry ? (now - cloudEntry.bornAt) / 1000 : 0
-          const cloudAngle = cloudEntry
-            ? (cloudEntry.startAngle ?? 0) + omega * cloudAge
-            : startAngle
           burstsRef.current.push({
             id: nextBurstIdRef.current++,
             freq: h.freq,
             bornMs: now,
             magnitude: h.bonus,
-            angleIn: startAngle,
-            angleCloud: cloudAngle,
             colorIn: incomingColor,
             colorCloud: PAD_COLORS[h.cloudNoteId] ?? incomingColor,
           })
@@ -414,7 +380,6 @@ export function HarvestStage({
           amp: ih.amp,
           bornAmp: ih.amp,
           bornAt: now,
-          startAngle,
         })
       }
     }
