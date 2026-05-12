@@ -100,29 +100,32 @@ export function scanCoincidences(
   return { total, hits }
 }
 
-// Per-pair idle Resonance rate. The auto-pluck loop staggers slots by half a
-// cadence so when slot B fires, slot A's cloud is half-decayed and vice-versa
-// — we model that by scanning B's incoming series against A's series at half
-// amplitude (`cloudAmpFrac = 0.5`). Each slot fires once per cadence, so the
-// scan total counts twice per cadence period (once per direction). Pure
-// function so on-tab auto-pluck income and off-tab analytic accrual stay in
-// sync.
-export function idlePairResonancePerSec(
+// Per-partial idle harvest rate. Each pair of auto-plucked notes (A, B) lands
+// the same partial-pair coincidences twice per cadence (A→B and B→A). For
+// every coincidence event we award one unit of HK currency to *each* side of
+// the pair (the cloud-partial side AND the incoming-partial side), matching
+// the on-tap path which pushes both partials into the cloud after the hit.
+// Pure function so off-tab idle accrual mirrors the on-tab credit exactly.
+export function idlePairHarmonicCountsPerSec(
   seriesA: Array<{ partial: number; freq: number; amp: number }>,
   seriesB: Array<{ partial: number; freq: number; amp: number }>,
-  opts: { cadenceS: number; gain: number; tolFrac?: number; cloudAmpFrac?: number },
-): number {
-  const cloudAmpFrac = opts.cloudAmpFrac ?? 0.5
+  opts: { cadenceS: number; tolFrac?: number; minPartial?: number; maxPartial?: number },
+): Record<number, number> {
   const tol = opts.tolFrac ?? 0.005
-  const aAsCloud: Harmonic[] = seriesA.map((h) => ({
-    noteId: '_a',
-    partial: h.partial,
-    freq: h.freq,
-    amp: h.amp * cloudAmpFrac,
-    bornAmp: h.amp,
-    bornAt: 0,
-  }))
-  const { total } = scanCoincidences(aAsCloud, seriesB, { tolFrac: tol, gain: opts.gain })
-  // total = bonus from one cross-pluck. Both directions fire each cadence.
-  return (2 * total) / opts.cadenceS
+  const lo = opts.minPartial ?? 2
+  const hi = opts.maxPartial ?? Infinity
+  const out: Record<number, number> = {}
+  const eventsPerSec = 2 / opts.cadenceS
+  for (const a of seriesA) {
+    for (const b of seriesB) {
+      if (!isCoincident(a.freq, b.freq, tol)) continue
+      if (a.partial >= lo && a.partial <= hi) {
+        out[a.partial] = (out[a.partial] ?? 0) + eventsPerSec
+      }
+      if (b.partial >= lo && b.partial <= hi) {
+        out[b.partial] = (out[b.partial] ?? 0) + eventsPerSec
+      }
+    }
+  }
+  return out
 }

@@ -444,33 +444,93 @@ main h1 {
 
 /* --- Currency readout --- */
 
-.currencies {
-  display: inline-flex;
-  gap: 18px;
-  margin: 0;
-  padding: 0;
-  font-family: var(--mono);
-}
-
-.currencies > div {
+.currencies-panel {
+  width: min(720px, 96vw);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
 }
 
-.currencies dt {
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.cur-row {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--mono);
+}
+
+.cur-empty {
+  font-family: var(--mono);
+  font-size: 0.78rem;
   color: var(--text);
-  margin: 0;
+  opacity: 0.7;
 }
 
-.currencies dd {
-  margin: 0;
-  font-size: 1.05rem;
+.cur-chip {
+  --chip-color: var(--text);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-color) 6%, transparent);
+  font-size: 0.82rem;
   color: var(--text-h);
+}
+
+.cur-chip-harm {
+  border-style: dashed;
+}
+
+.cur-key {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--chip-color);
+  font-weight: 600;
+}
+
+.cur-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-h);
+}
+
+/* Inline cost chips on unlock/upgrade cards. Smaller + denser than the
+   header chips so a long cost line still fits on one row. */
+.cost-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.cost-chip {
+  --chip-color: var(--text);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 40%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-color) 5%, transparent);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-h);
+}
+
+.cost-chip-v {
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-chip-k {
+  color: var(--chip-color);
+  font-weight: 600;
 }
 
 /* --- Harvest stage --- */
@@ -836,15 +896,44 @@ main h1 {
 
 .idle-rate {
   margin: 0;
-  text-align: center;
-  font-size: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
   color: var(--text);
   font-family: var(--mono);
 }
 
-.idle-rate strong {
+.idle-label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  color: var(--text);
+  opacity: 0.75;
+  margin-right: 2px;
+}
+
+.idle-pill {
+  --chip-color: var(--text);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-color) 4%, transparent);
+}
+
+.idle-pill strong {
   color: var(--text-h);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.idle-pill span {
+  color: var(--chip-color);
 }
 
 .unlocks {
@@ -856,15 +945,25 @@ main h1 {
   gap: 8px;
 }
 
-/* The two yield upgrades always share a row — they're a paired
-   compound-loop and reading them side-by-side makes that legible. */
+/* Per-note yield upgrades — one card per unlocked note, priced in the
+   next note on the circle of fifths. Auto-fits to row width so the
+   panel grows naturally as the player unlocks more notes. */
 .upgrades {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 8px;
+}
+
+.upgrade-note {
+  --chip-color: var(--text);
+  border-color: color-mix(in srgb, var(--chip-color) 35%, var(--border));
+}
+
+.upgrade-note .upgrade-name {
+  color: var(--chip-color);
 }
 
 .upgrade {
