@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
 import { BODIES, ratioLabel as toRatioLabel } from './bodies'
@@ -54,6 +54,27 @@ const chromaAngleOf = (freq: number) => {
   return frac * 2 * Math.PI - Math.PI / 2
 }
 
+// SVG viewBox + geometry. Fixed coordinate system so the renderer never has
+// to listen for resize — the CSS scales the <svg> and preserveAspectRatio
+// keeps the helix centred at any aspect ratio.
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const VIEW_W = 480
+const VIEW_H = 360
+const CX = VIEW_W / 2
+const CY = VIEW_H / 2
+const R_OUTER = 148
+const R_BASE = 48
+
+const radiusOf = (freq: number) => {
+  const p = Math.max(0, pitchOf(freq))
+  return R_BASE + (R_OUTER - R_BASE) * Math.min(1, p / P_MAX)
+}
+const polar = (freq: number): [number, number] => {
+  const r = radiusOf(freq)
+  const a = chromaAngleOf(freq)
+  return [CX + r * Math.cos(a), CY + r * Math.sin(a)]
+}
+
 type Burst = {
   id: number
   freq: number
@@ -86,7 +107,9 @@ export function HarvestStage({
   onTone,
   onResonance,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const cloudGroupRef = useRef<SVGGElement>(null)
+  const burstGroupRef = useRef<SVGGElement>(null)
+  const emptyHintRef = useRef<SVGTextElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
@@ -98,6 +121,15 @@ export function HarvestStage({
   const autoSlotsRef = useRef(autoPluckSlots)
   const onToneRef = useRef(onTone)
   const onResonanceRef = useRef(onResonance)
+
+  // Set of every note currently in any slot. Used to highlight chroma-compass
+  // anchors so the player can read which notes are loaded without having to
+  // glance down at the pads.
+  const slotted = useMemo(() => {
+    const s = new Set<BodyId>()
+    for (const slotNotes of slots) for (const id of slotNotes) s.add(id)
+    return s
+  }, [slots])
 
   useEffect(() => {
     onToneRef.current = onTone
@@ -112,19 +144,14 @@ export function HarvestStage({
     autoSlotsRef.current = autoPluckSlots
   }, [autoPluckSlots])
 
-  // rAF: decay cloud + bursts, redraw the pitch helix. Position is fully
-  // determined by frequency — angle is the pitch's chroma (octave fraction),
-  // radius is the pitch's octave (log2(f/tonic)). Two partials with the same
-  // frequency overlap as the literal same dot, which is the whole point of
-  // the coincidence mechanic.
+  // rAF: decay the cloud + bursts, then push their current state into the
+  // two dynamic SVG groups. The static layer (octave rings, base ring,
+  // chroma compass) is declared in JSX below and never touched here —
+  // React handles slot-driven changes via re-render.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx2d = canvas.getContext('2d')
-    if (!ctx2d) return
-
     let raf = 0
     let last = performance.now()
+    let wasEmpty: boolean | null = null
 
     const draw = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000)
@@ -146,146 +173,76 @@ export function HarvestStage({
       }
       bursts.length = bw
 
-      const dpr = window.devicePixelRatio || 1
-      const cssW = canvas.clientWidth
-      const cssH = canvas.clientHeight
-      if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
-        canvas.width = Math.max(1, cssW * dpr)
-        canvas.height = Math.max(1, cssH * dpr)
-      }
-      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx2d.clearRect(0, 0, cssW, cssH)
+      const cloudG = cloudGroupRef.current
+      if (cloudG) {
+        const nodes: SVGElement[] = []
+        for (const h of cloud) {
+          const [x, y] = polar(h.freq)
+          const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
+          const opacity = Math.max(0.15, norm)
+          const color = PAD_COLORS[h.noteId] ?? '#aa3bff'
+          const isFund = h.partial === 1
+          const dotR = isFund ? 6 : Math.max(1.6, 4.5 / h.partial)
 
-      const styles = getComputedStyle(document.documentElement)
-      const accent = styles.getPropertyValue('--accent').trim() || '#aa3bff'
-      const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
-      const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
+          const dot = document.createElementNS(SVG_NS, 'circle')
+          dot.setAttribute('cx', x.toFixed(2))
+          dot.setAttribute('cy', y.toFixed(2))
+          dot.setAttribute('r', dotR.toFixed(2))
+          dot.setAttribute('fill', color)
+          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.8)))
+          nodes.push(dot)
 
-      const cx = cssW / 2
-      const cy = cssH / 2
-      const rOuter = Math.max(40, Math.min(cssW, cssH) / 2 - 22)
-      // Fundamentals (p < 1) live on the base ring; the outer ring sits at
-      // p = P_MAX. Reserve a chunk of the disk for the base ring so the 7
-      // diatonic chroma dots have room to read.
-      const rBase = Math.max(28, rOuter * 0.26)
-      const radiusOf = (freq: number) => {
-        const p = Math.max(0, pitchOf(freq))
-        return rBase + (rOuter - rBase) * Math.min(1, p / P_MAX)
-      }
-
-      // Octave guide rings at p = 1, 2, 3 — the points where C/D/E/.../B
-      // wrap back to the same chroma, one octave higher.
-      ctx2d.strokeStyle = withAlpha(border, 0.45)
-      ctx2d.lineWidth = 1
-      ctx2d.setLineDash([2, 5])
-      for (let oct = 1; oct <= Math.floor(P_MAX); oct++) {
-        const r = rBase + (rOuter - rBase) * (oct / P_MAX)
-        ctx2d.beginPath()
-        ctx2d.arc(cx, cy, r, 0, 2 * Math.PI)
-        ctx2d.stroke()
-      }
-      ctx2d.setLineDash([])
-      // Solid base ring — the home of all fundamentals.
-      ctx2d.strokeStyle = withAlpha(border, 0.7)
-      ctx2d.beginPath()
-      ctx2d.arc(cx, cy, rBase, 0, 2 * Math.PI)
-      ctx2d.stroke()
-
-      // Chroma compass: every diatonic note marked at its chroma angle on
-      // the base ring. Slotted notes glow in their pad color; the rest sit
-      // as faint anchors so the player can read pitch geometry before
-      // plucking anything.
-      const slotsNow = slotsRef.current
-      const slotted = new Set<BodyId>()
-      for (const slotNotes of slotsNow) for (const id of slotNotes) slotted.add(id)
-      ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
-      ctx2d.textAlign = 'center'
-      ctx2d.textBaseline = 'middle'
-      for (const body of BODIES) {
-        const f = TONIC_HZ * body.ratio
-        const ang = chromaAngleOf(f)
-        const x = cx + rBase * Math.cos(ang)
-        const y = cy + rBase * Math.sin(ang)
-        const isOn = slotted.has(body.id)
-        const color = PAD_COLORS[body.id] ?? accent
-        ctx2d.fillStyle = withAlpha(color, isOn ? 0.35 : 0.18)
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, isOn ? 4 : 2.5, 0, 2 * Math.PI)
-        ctx2d.fill()
-        // Letter just outside the base ring.
-        const lx = cx + (rBase + 12) * Math.cos(ang)
-        const ly = cy + (rBase + 12) * Math.sin(ang)
-        ctx2d.fillStyle = withAlpha(color, isOn ? 0.95 : 0.45)
-        ctx2d.fillText(body.id, lx, ly)
-      }
-
-      // Tonic anchor at the centre.
-      ctx2d.fillStyle = withAlpha(border, 0.6)
-      ctx2d.beginPath()
-      ctx2d.arc(cx, cy, 2, 0, 2 * Math.PI)
-      ctx2d.fill()
-
-      // Cloud partials. Higher partials are smaller; fundamentals get an
-      // outline so the slot's "voice" stays legible. Drawn additive-ish
-      // (no special blend, but alpha-stacked dots naturally brighten where
-      // partials overlap — i.e. at coincidences).
-      for (const h of cloud) {
-        const ang = chromaAngleOf(h.freq)
-        const r = radiusOf(h.freq)
-        const x = cx + r * Math.cos(ang)
-        const y = cy + r * Math.sin(ang)
-        const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
-        const opacity = Math.max(0.15, norm)
-        const color = PAD_COLORS[h.noteId] ?? accent
-        const isFund = h.partial === 1
-        const dotR = isFund ? 6 : Math.max(1.6, 4.5 / h.partial)
-
-        ctx2d.fillStyle = withAlpha(color, opacity * (isFund ? 1 : 0.8))
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, dotR, 0, 2 * Math.PI)
-        ctx2d.fill()
-
-        if (isFund) {
-          ctx2d.strokeStyle = withAlpha(color, opacity * 0.9)
-          ctx2d.lineWidth = 1.25
-          ctx2d.beginPath()
-          ctx2d.arc(x, y, dotR + 2.5, 0, 2 * Math.PI)
-          ctx2d.stroke()
+          if (isFund) {
+            const ring = document.createElementNS(SVG_NS, 'circle')
+            ring.setAttribute('cx', x.toFixed(2))
+            ring.setAttribute('cy', y.toFixed(2))
+            ring.setAttribute('r', (dotR + 2.5).toFixed(2))
+            ring.setAttribute('fill', 'none')
+            ring.setAttribute('stroke', color)
+            ring.setAttribute('stroke-opacity', String(opacity * 0.9))
+            ring.setAttribute('stroke-width', '1.25')
+            nodes.push(ring)
+          }
         }
+        cloudG.replaceChildren(...nodes)
       }
 
-      // Coincidence flashes. Both partials overlap at the same (r, θ), so
-      // we just pulse a glowing halo there in the blended color of the two
-      // contributing notes.
-      for (const b of bursts) {
-        const u = (now - b.bornMs) / BURST_MS
-        const ang = chromaAngleOf(b.freq)
-        const r = radiusOf(b.freq)
-        const x = cx + r * Math.cos(ang)
-        const y = cy + r * Math.sin(ang)
-        const alpha = (1 - u) * 0.9
-        const blended = blendColors(b.colorIn, b.colorCloud, 0.5)
-        const haloR = 6 + 22 * u * Math.min(1, b.magnitude * 4)
+      const burstG = burstGroupRef.current
+      if (burstG) {
+        const nodes: SVGElement[] = []
+        for (const b of bursts) {
+          const u = (now - b.bornMs) / BURST_MS
+          const [x, y] = polar(b.freq)
+          const alpha = (1 - u) * 0.9
+          const blended = blendColors(b.colorIn, b.colorCloud, 0.5)
+          const haloR = 6 + 22 * u * Math.min(1, b.magnitude * 4)
 
-        ctx2d.fillStyle = withAlpha(blended, alpha * 0.3)
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, haloR, 0, 2 * Math.PI)
-        ctx2d.fill()
-        ctx2d.strokeStyle = withAlpha(blended, alpha)
-        ctx2d.lineWidth = 1.5
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, haloR, 0, 2 * Math.PI)
-        ctx2d.stroke()
+          const fill = document.createElementNS(SVG_NS, 'circle')
+          fill.setAttribute('cx', x.toFixed(2))
+          fill.setAttribute('cy', y.toFixed(2))
+          fill.setAttribute('r', haloR.toFixed(2))
+          fill.setAttribute('fill', blended)
+          fill.setAttribute('fill-opacity', String(alpha * 0.3))
+          nodes.push(fill)
+
+          const stroke = document.createElementNS(SVG_NS, 'circle')
+          stroke.setAttribute('cx', x.toFixed(2))
+          stroke.setAttribute('cy', y.toFixed(2))
+          stroke.setAttribute('r', haloR.toFixed(2))
+          stroke.setAttribute('fill', 'none')
+          stroke.setAttribute('stroke', blended)
+          stroke.setAttribute('stroke-opacity', String(alpha))
+          stroke.setAttribute('stroke-width', '1.5')
+          nodes.push(stroke)
+        }
+        burstG.replaceChildren(...nodes)
       }
 
-      if (cloud.length === 0 && bursts.length === 0) {
-        ctx2d.fillStyle = textH
-        ctx2d.globalAlpha = 0.35
-        ctx2d.textAlign = 'center'
-        ctx2d.textBaseline = 'middle'
-        ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('tap a slot to play', cx, Math.min(cssH - 12, cy + rOuter + 16))
-        ctx2d.globalAlpha = 1
+      const isEmpty = cloud.length === 0 && bursts.length === 0
+      if (isEmpty !== wasEmpty) {
+        wasEmpty = isEmpty
+        const hint = emptyHintRef.current
+        if (hint) hint.style.opacity = isEmpty ? '0.35' : '0'
       }
 
       raf = requestAnimationFrame(draw)
@@ -482,7 +439,102 @@ export function HarvestStage({
 
   return (
     <section className="harvest" aria-label="Resonator stage">
-      <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
+      <svg
+        className="spectrum"
+        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      >
+        {/* Octave guide rings — one per integer p, where the chroma wraps. */}
+        {Array.from({ length: Math.floor(P_MAX) }, (_, i) => {
+          const oct = i + 1
+          const r = R_BASE + (R_OUTER - R_BASE) * (oct / P_MAX)
+          return (
+            <circle
+              key={`oct-${oct}`}
+              cx={CX}
+              cy={CY}
+              r={r}
+              fill="none"
+              strokeWidth="1"
+              strokeDasharray="2 5"
+              style={{ stroke: 'var(--border)', strokeOpacity: 0.45 }}
+            />
+          )
+        })}
+
+        {/* Solid base ring — home of every note's fundamental. */}
+        <circle
+          cx={CX}
+          cy={CY}
+          r={R_BASE}
+          fill="none"
+          strokeWidth="1"
+          style={{ stroke: 'var(--border)', strokeOpacity: 0.7 }}
+        />
+
+        {/* Chroma compass: all 7 diatonic notes anchored at their just-
+            intonation chroma angles on the base ring. Slotted notes glow,
+            unslotted ones stay faint anchors. */}
+        {BODIES.map((body) => {
+          const ang = chromaAngleOf(TONIC_HZ * body.ratio)
+          const x = CX + R_BASE * Math.cos(ang)
+          const y = CY + R_BASE * Math.sin(ang)
+          const lx = CX + (R_BASE + 14) * Math.cos(ang)
+          const ly = CY + (R_BASE + 14) * Math.sin(ang)
+          const isOn = slotted.has(body.id)
+          const color = PAD_COLORS[body.id] ?? '#aa3bff'
+          return (
+            <g key={body.id}>
+              <circle
+                cx={x}
+                cy={y}
+                r={isOn ? 4 : 2.5}
+                fill={color}
+                fillOpacity={isOn ? 0.4 : 0.18}
+              />
+              <text
+                x={lx}
+                y={ly}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontFamily="ui-monospace, Menlo, Consolas, monospace"
+                fontSize="11"
+                fill={color}
+                fillOpacity={isOn ? 0.95 : 0.45}
+              >
+                {body.id}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* Tonic anchor at the centre. */}
+        <circle
+          cx={CX}
+          cy={CY}
+          r={2}
+          style={{ fill: 'var(--border)', fillOpacity: 0.6 }}
+        />
+
+        {/* Dynamic layers — populated imperatively by the rAF loop. */}
+        <g ref={cloudGroupRef} />
+        <g ref={burstGroupRef} />
+
+        {/* Empty-state hint — faded in/out from rAF when both layers empty. */}
+        <text
+          ref={emptyHintRef}
+          x={CX}
+          y={CY + R_OUTER + 22}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontFamily="ui-monospace, Menlo, Consolas, monospace"
+          fontSize="12"
+          style={{ fill: 'var(--text-h)', opacity: 0.35, transition: 'opacity 120ms ease' }}
+        >
+          tap a slot to play
+        </text>
+      </svg>
       <ul className="pads" role="list">
         {Array.from({ length: slotCount }, (_, idx) => {
           const notes = slots[idx] ?? []
@@ -675,18 +727,3 @@ function blendColors(c1: string, c2: string, t = 0.5): string {
   return `rgb(${r},${g},${bl})`
 }
 
-function withAlpha(color: string, a: number): string {
-  if (color.startsWith('#') && color.length === 7) {
-    const r = parseInt(color.slice(1, 3), 16)
-    const g = parseInt(color.slice(3, 5), 16)
-    const b = parseInt(color.slice(5, 7), 16)
-    return `rgba(${r},${g},${b},${a})`
-  }
-  if (color.startsWith('rgba(')) {
-    return color.replace(/,[^,]*\)$/, `,${a})`)
-  }
-  if (color.startsWith('rgb(')) {
-    return color.replace('rgb(', 'rgba(').replace(')', `,${a})`)
-  }
-  return color
-}
