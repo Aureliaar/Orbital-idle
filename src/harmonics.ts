@@ -100,31 +100,32 @@ export function scanCoincidences(
   return { total, hits }
 }
 
-// Per-partial idle harvest rate. Each pair of auto-plucked notes (A, B) lands
-// the same partial-pair coincidences twice per cadence (A→B and B→A). For
-// every coincidence event we award one unit of HK currency to *each* side of
-// the pair (the cloud-partial side AND the incoming-partial side), matching
-// the on-tap path which pushes both partials into the cloud after the hit.
-// Pure function so off-tab idle accrual mirrors the on-tab credit exactly.
-export function idlePairHarmonicCountsPerSec(
+// Per-frequency idle harvest rate. Each pair of auto-plucked notes (A, B)
+// lands its partial-pair coincidences twice per cadence (A→B and B→A).
+// Each coincidence event mints exactly one unit of the currency keyed by
+// the coincidence frequency — `keyForFreq` does the lookup (returns null
+// for frequencies outside the harvestable set). Pure function so off-tab
+// idle accrual mirrors the on-tab credit exactly.
+export function idlePairFreqCountsPerSec(
   seriesA: Array<{ partial: number; freq: number; amp: number }>,
   seriesB: Array<{ partial: number; freq: number; amp: number }>,
-  opts: { cadenceS: number; tolFrac?: number; minPartial?: number; maxPartial?: number },
-): Record<number, number> {
+  opts: {
+    cadenceS: number
+    tolFrac?: number
+    keyForFreq: (hz: number) => string | null
+  },
+): Record<string, number> {
   const tol = opts.tolFrac ?? 0.005
-  const lo = opts.minPartial ?? 2
-  const hi = opts.maxPartial ?? Infinity
-  const out: Record<number, number> = {}
+  const out: Record<string, number> = {}
+  // Two cross-plucks per cadence (A→B then B→A) means one logical pair
+  // mints currency twice per cadence period.
   const eventsPerSec = 2 / opts.cadenceS
   for (const a of seriesA) {
     for (const b of seriesB) {
       if (!isCoincident(a.freq, b.freq, tol)) continue
-      if (a.partial >= lo && a.partial <= hi) {
-        out[a.partial] = (out[a.partial] ?? 0) + eventsPerSec
-      }
-      if (b.partial >= lo && b.partial <= hi) {
-        out[b.partial] = (out[b.partial] ?? 0) + eventsPerSec
-      }
+      const key = opts.keyForFreq((a.freq + b.freq) / 2)
+      if (!key) continue
+      out[key] = (out[key] ?? 0) + eventsPerSec
     }
   }
   return out

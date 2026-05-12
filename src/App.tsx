@@ -10,9 +10,10 @@ import {
   addToPurse,
   canAfford as canAffordPurse,
   computeIdleRate,
-  HARMONIC_COLORS,
-  HARMONIC_CURRENCIES,
-  HARMONIC_INTERVAL_LABEL,
+  FREQ_COLORS,
+  FREQ_CURRENCIES,
+  FREQ_CURRENCY_KEYS,
+  FREQ_INTERVAL_LABEL,
   INITIAL_SLOT_COUNT,
   MAX_SLOT0_CAPACITY,
   MAX_SLOT_COUNT,
@@ -23,6 +24,7 @@ import {
 import type {
   CurrencyKey,
   CurrencyPurse,
+  FreqCurrency,
   NoteCurrency,
 } from './harvest-config'
 import { PlanetTile } from './PlanetTile'
@@ -33,35 +35,36 @@ type Tab = 'orbits' | 'harvest'
 // --- Cost tables --------------------------------------------------------
 //
 // Every cost is a CurrencyPurse. Note-currencies (C..B) come from tapping
-// that note; harmonic-currencies (H2..H6) come from landing a partial-K
-// coincidence (both sides of the pair get paid). A cost line that demands
-// HK proves the player has actually heard the corresponding interval at
-// least N times in their slot configuration so far.
+// that note; freq-currencies (F3, F15_4, F4, F9_2, F5, F45_8, F6, F20_3,
+// F15_2) come from landing a partial-pair coincidence at that frequency.
+// Each coincidence mints exactly one unit of the freq-currency for the
+// frequency where its partials lined up.
 //
-// Reachable partial pairs at HARMONIC_COUNT=6 (so we know which HK is
-// earnable when each step of the ladder opens):
-//   C×E (M3, 5:4) → H4 + H5
-//   C×G (P5, 3:2) → H2 + H3, also (4,6)
-//   C×F (P4, 4:3) → H3 + H4
-//   C×A (M6, 5:3) → H3 + H5
-//   E×G (m3, 6:5) → H5 + H6
-//   E×A (P4, 4:3) → H3 + H4
-//   E×B (P5, 3:2) → H2 + H3
-//   G×D (P4, 4:3) → H3 + H4
-//   G×B (M3, 5:4) → H4 + H5
-//   A×F (M3, 5:4) → H4 + H5
-// Every entry on the ladder requires a harmonic that the previous steps
-// have made earnable.
+// Reachable coincidences in the diatonic at H≤6 (so we know which freq
+// is earnable once each ladder step opens):
+//   C×E (M3, freq=5)              → F5
+//   C×G (P5, freq=3 and freq=6)   → F3, F6
+//   C×F (P4, freq=4)              → F4
+//   C×A (M6, freq=5)              → F5
+//   D×G (P4, freq=9/2)            → F9_2
+//   D×B (M6, freq=45/8)           → F45_8
+//   E×G (m3, freq=15/2)           → F15_2
+//   E×A (P4, freq=5)              → F5
+//   E×B (P5, freq=15/4 and 15/2)  → F15_4, F15_2
+//   F×A (M3, freq=20/3)           → F20_3
+//   G×B (M3, freq=15/2)           → F15_2
+// Every entry on the ladder requires a freq-currency that the previous
+// steps have already made earnable.
 
 const UNLOCK_LADDER: BodyId[] = ['C', 'E', 'G', 'F', 'A', 'D', 'B']
 const UNLOCK_COSTS: Record<BodyId, CurrencyPurse> = {
   C: {},
   E: { C: 5 },
-  G: { C: 8, E: 4, H5: 2 },
-  F: { C: 15, E: 6, G: 6, H2: 3, H3: 3 },
-  A: { E: 12, G: 12, F: 6, H4: 5 },
-  D: { G: 18, F: 12, A: 8, H3: 6, H5: 5 },
-  B: { D: 10, A: 10, G: 15, F: 12, H3: 6, H4: 6, H6: 4 },
+  G: { C: 8, E: 4, F5: 2 }, // proves C×E
+  F: { C: 15, E: 6, G: 6, F3: 2, F6: 2 }, // proves C×G in both octaves
+  A: { E: 12, G: 12, F: 6, F4: 4 }, // proves C×F
+  D: { G: 18, F: 12, A: 8, F5: 4, F15_2: 3 }, // proves E×G or G×B
+  B: { D: 10, A: 10, G: 15, F: 12, F9_2: 4, F20_3: 4 }, // proves D×G and F×A
 }
 
 // Auto-pluck base cost — a "you've played the diatonic" tax. Each note
@@ -72,10 +75,10 @@ const AUTO_PLUCK_BASE_COST: CurrencyPurse = {
   E: 80,
   G: 60,
   F: 40,
-  H2: 12,
-  H3: 12,
-  H4: 12,
-  H5: 12,
+  F3: 8,
+  F5: 8,
+  F4: 8,
+  F6: 8,
 }
 const AUTO_PLUCK_MIN_UNLOCKS = 3
 const autoPluckCost = (slotIdx: number): CurrencyPurse => {
@@ -88,22 +91,22 @@ const autoPluckCost = (slotIdx: number): CurrencyPurse => {
 }
 
 // Slot 2 is intentionally cheap and unlock-able from C alone: with one
-// slot you can't make a coincidence yet, so the harmonic requirement
-// would be unreachable. Slot 3 demands harmonics — by then you've had a
+// slot you can't make a coincidence yet, so the freq requirement would
+// be unreachable. Slot 3 demands freq currency — by then you've had a
 // pair of slots ringing together for a while.
 const SLOT_UNLOCK_COSTS: Record<number, CurrencyPurse> = {
   2: { C: 8 },
-  3: { C: 30, E: 18, G: 12, H4: 6, H5: 6 },
+  3: { C: 30, E: 18, G: 12, F3: 4, F5: 6 },
 }
 const SLOT_UNLOCK_GATES: Record<number, BodyId> = {
   2: 'E',
 }
 
-// Slot 0 capacity ladder — stacking chords. Pricing demands triad-shaped
-// harmonic mixes (M3 + m3 = a major triad's partials).
+// Slot 0 capacity ladder — stacking chords. Pricing demands a chord-
+// shaped freq mix.
 const SLOT0_CAPACITY_COSTS: Record<number, CurrencyPurse> = {
-  2: { E: 30, G: 20, H4: 12, H5: 12 },
-  3: { F: 50, A: 30, H3: 18, H4: 18, H5: 18, H6: 10 },
+  2: { E: 30, G: 20, F5: 6, F15_2: 4 },
+  3: { F: 50, A: 30, F3: 6, F4: 6, F5: 6, F15_2: 6 },
 }
 
 // --- Per-note yield upgrades --------------------------------------------
@@ -206,35 +209,48 @@ const formatCurrency = (v: number): string => {
   return v.toFixed(2)
 }
 
+const FREQ_LABEL_BY_KEY: Record<FreqCurrency, string> = FREQ_CURRENCIES.reduce(
+  (acc, e) => {
+    acc[e.key] = e.label
+    return acc
+  },
+  {} as Record<FreqCurrency, string>,
+)
+
+const displayCurrencyKey = (k: CurrencyKey): string => {
+  if (k in FREQ_LABEL_BY_KEY) return `f${FREQ_LABEL_BY_KEY[k as FreqCurrency]}`
+  return k
+}
+
 const formatCost = (cost: CurrencyPurse): string => {
   const parts: string[] = []
   for (const k of NOTE_CURRENCIES) {
     const v = cost[k]
     if (v) parts.push(`${v} ${k}`)
   }
-  for (const k of HARMONIC_CURRENCIES) {
+  for (const k of FREQ_CURRENCY_KEYS) {
     const v = cost[k]
-    if (v) parts.push(`${v} ${k}`)
+    if (v) parts.push(`${v} ${displayCurrencyKey(k)}`)
   }
   return parts.join(' · ')
 }
 
 function CostChips({ cost }: { cost: CurrencyPurse }) {
-  const entries: Array<{ k: CurrencyKey; v: number; color: string }> = []
+  const entries: Array<{ k: CurrencyKey; label: string; v: number; color: string }> = []
   for (const k of NOTE_CURRENCIES) {
     const v = cost[k]
-    if (v) entries.push({ k, v, color: PAD_COLORS[k] ?? 'var(--text)' })
+    if (v) entries.push({ k, label: k, v, color: PAD_COLORS[k] ?? 'var(--text)' })
   }
-  for (const k of HARMONIC_CURRENCIES) {
+  for (const k of FREQ_CURRENCY_KEYS) {
     const v = cost[k]
-    if (v) entries.push({ k, v, color: HARMONIC_COLORS[k] })
+    if (v) entries.push({ k, label: displayCurrencyKey(k), v, color: FREQ_COLORS[k] })
   }
   return (
     <span className="cost-chips" aria-label={formatCost(cost)}>
-      {entries.map(({ k, v, color }) => (
+      {entries.map(({ k, label, v, color }) => (
         <span key={k} className="cost-chip" style={{ ['--chip-color' as string]: color }}>
           <span className="cost-chip-v">{v}</span>
-          <span className="cost-chip-k">{k}</span>
+          <span className="cost-chip-k">{label}</span>
         </span>
       ))}
     </span>
@@ -763,17 +779,31 @@ function App() {
   const visibleNoteCurrencies = NOTE_CURRENCIES.filter(
     (k) => seenCurrencies.has(k) || (currencies[k] ?? 0) > 0,
   )
-  const visibleHarmonics = HARMONIC_CURRENCIES.filter(
+  const visibleFreqs = FREQ_CURRENCY_KEYS.filter(
     (k) => seenCurrencies.has(k) || (currencies[k] ?? 0) > 0,
   )
-  const visibleIdleEntries: Array<{ k: CurrencyKey; rate: number; color: string }> = []
+  const visibleIdleEntries: Array<{
+    k: CurrencyKey
+    label: string
+    rate: number
+    color: string
+  }> = []
   for (const k of NOTE_CURRENCIES) {
     const rate = idleRate[k] ?? 0
-    if (rate > 0) visibleIdleEntries.push({ k, rate, color: PAD_COLORS[k] ?? 'var(--text)' })
+    if (rate > 0) {
+      visibleIdleEntries.push({ k, label: k, rate, color: PAD_COLORS[k] ?? 'var(--text)' })
+    }
   }
-  for (const k of HARMONIC_CURRENCIES) {
+  for (const k of FREQ_CURRENCY_KEYS) {
     const rate = idleRate[k] ?? 0
-    if (rate > 0) visibleIdleEntries.push({ k, rate, color: HARMONIC_COLORS[k] })
+    if (rate > 0) {
+      visibleIdleEntries.push({
+        k,
+        label: displayCurrencyKey(k),
+        rate,
+        color: FREQ_COLORS[k],
+      })
+    }
   }
 
   return (
@@ -826,21 +856,21 @@ function App() {
             })
           )}
         </ul>
-        {visibleHarmonics.length > 0 && (
-          <ul className="cur-row cur-harmonics" role="list" aria-label="Harmonic currencies">
-            {visibleHarmonics.map((k) => {
+        {visibleFreqs.length > 0 && (
+          <ul className="cur-row cur-harmonics" role="list" aria-label="Frequency currencies">
+            {visibleFreqs.map((k) => {
               const v = currencies[k] ?? 0
-              const color = HARMONIC_COLORS[k]
-              const partial = Number(k.slice(1))
-              const interval = HARMONIC_INTERVAL_LABEL[partial] ?? ''
+              const color = FREQ_COLORS[k]
+              const ratio = FREQ_LABEL_BY_KEY[k]
+              const interval = FREQ_INTERVAL_LABEL[k] ?? ''
               return (
                 <li
                   key={k}
                   className="cur-chip cur-chip-harm"
                   style={{ ['--chip-color' as string]: color }}
-                  title={`${k} — minted on partial-${partial} coincidence (${interval})`}
+                  title={`f${ratio} — coincidence frequency ${ratio}·tonic (${interval})`}
                 >
-                  <span className="cur-key">{k}</span>
+                  <span className="cur-key">f{ratio}</span>
                   <span className="cur-value">{formatCurrency(v)}</span>
                 </li>
               )
@@ -922,14 +952,14 @@ function App() {
             {anyAutoPluck && visibleIdleEntries.length > 0 && (
               <p className="idle-rate" aria-label="Idle rate">
                 <span className="idle-label">Idle</span>
-                {visibleIdleEntries.map(({ k, rate, color }) => (
+                {visibleIdleEntries.map(({ k, label, rate, color }) => (
                   <span
                     key={k}
                     className="idle-pill"
                     style={{ ['--chip-color' as string]: color }}
                   >
                     <strong>{rate.toFixed(2)}</strong>
-                    <span>{k}/s</span>
+                    <span>{label}/s</span>
                   </span>
                 ))}
               </p>

@@ -6,17 +6,17 @@ import type { BodyId } from './bodies'
 import {
   AUTO_PLUCK_PENALTY,
   COINCIDENCE_TOL,
+  FREQ_CURRENCIES,
+  FREQ_INTERVAL_LABEL,
   HARMONIC_COUNT,
-  HARMONIC_INTERVAL_LABEL,
-  MAX_HARMONIC_CURRENCY,
   MAX_SLOT_COUNT,
-  MIN_HARMONIC_CURRENCY,
   PAD_COLORS,
   RING_DURATION_MS,
   RING_DURATION_S,
   TONIC_HZ,
+  freqToCurrency,
 } from './harvest-config'
-import type { CurrencyPurse, HarmonicCurrency } from './harvest-config'
+import type { CurrencyPurse } from './harvest-config'
 import {
   defaultAmp,
   harmonicSeries,
@@ -284,9 +284,10 @@ export function HarvestStage({
   // Currency mint, per stack-fire:
   //   - 1 unit of NoteCurrency[noteId] per note in the stack (× per-note
   //     yield × auto penalty).
-  //   - For every coincident partial pair (incomingPartial, cloudPartial):
-  //     +1 unit each of H{incomingPartial} and H{cloudPartial} currency
-  //     (subject to MIN_HARMONIC_CURRENCY..MAX_HARMONIC_CURRENCY).
+  //   - For every coincident partial pair, exactly +1 unit of the
+  //     FreqCurrency for the frequency at which the partials lined up.
+  //     C×E lining up at 5·tonic mints F5 — no matter which partials of
+  //     each note happened to coincide.
   //
   // A slot can hold a stack of notes (slot 0's capacity upgrade). The
   // stack fires sequentially in array order — each note scans the cloud
@@ -336,23 +337,24 @@ export function HarvestStage({
       purse[noteId] = (purse[noteId] ?? 0) + autoMul * yieldMul(noteId)
 
       for (const h of hits) {
-        const inP = h.incomingPartial
-        const clP = h.cloudPartial
-        if (inP >= MIN_HARMONIC_CURRENCY && inP <= MAX_HARMONIC_CURRENCY) {
-          const k = `H${inP}` as HarmonicCurrency
-          purse[k] = (purse[k] ?? 0) + autoMul
+        const freqKey = freqToCurrency(h.freq, TONIC_HZ)
+        if (freqKey) {
+          purse[freqKey] = (purse[freqKey] ?? 0) + autoMul
         }
-        if (clP >= MIN_HARMONIC_CURRENCY && clP <= MAX_HARMONIC_CURRENCY) {
-          const k = `H${clP}` as HarmonicCurrency
-          purse[k] = (purse[k] ?? 0) + autoMul
-        }
-        const interval = HARMONIC_INTERVAL_LABEL[Math.min(inP, clP)] ?? ''
+        const interval = freqKey ? FREQ_INTERVAL_LABEL[freqKey] : ''
+        const meta = FREQ_CURRENCIES.find((e) => e.key === freqKey)
+        const ratio = meta ? meta.label : ''
+        const label = freqKey
+          ? interval
+            ? `+f${ratio} · ${interval}`
+            : `+f${ratio}`
+          : ''
         burstsRef.current.push({
           id: nextBurstIdRef.current++,
           freq: h.freq,
           bornMs: now,
           magnitude: h.bonus,
-          label: interval ? `${interval} +H${inP}·H${clP}` : `+H${inP}·H${clP}`,
+          label,
         })
       }
 
