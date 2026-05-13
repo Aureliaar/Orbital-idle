@@ -8,17 +8,15 @@ import type { BodyId } from './bodies'
 import {
   defaultAmp,
   harmonicSeries,
-  idlePairResonancePerSec,
+  idlePairFreqCountsPerSec,
 } from './harmonics'
 
 // Tonic frequency: C3 (130.81 Hz). Matches the orbital stage's EARTH_HZ so
 // the harvest pluck synth stays in tune with the orbital drone.
 export const TONIC_HZ = 261.63 / 2
 
-// Bumped to H6 (was H4) so M3 (5:4) and M6 (5:3) become reachable
-// coincidences — E (M3) is the first purchasable note on the unlock ladder,
-// so its first coincidence with C must exist at H≤6 (C·H5 = E·H4). Still
-// out of reach at H≤6: M2 (9:8 → H≥9), M7 (15:8 → H≥15).
+// H6 reaches M3 (5:4) and M6 (5:3); M2 (9:8 → H≥9) and M7 (15:8 → H≥15)
+// remain unreachable.
 export const HARMONIC_COUNT = 6
 
 // Single source of truth for "how long does a tap ring?" — visual partials
@@ -30,28 +28,13 @@ export const RING_DURATION_MS = RING_DURATION_S * 1000
 // Coincidence detection tolerance — 0.5% ≈ 8.6 cents.
 export const COINCIDENCE_TOL = 0.005
 
-// Tuned so a perfect-fifth coincidence at H≤6 (C·H3 + C·H6 against G·H2 + G·H4,
-// bonus sum ≈ 0.208) tapped near the start of the ring pays ~5 Resonance.
-// Was 32 at HARMONIC_COUNT=4 where the fifth had a single coincidence (0.167).
-export const RESONANCE_GAIN = 28
-export const TONE_PER_TAP = 1
-
 // Up to three assignable slots — start with one and unlock the rest.
-// Slot 2 unlocks cheaply once E is bought (the first paired note needs
-// somewhere to go); slot 3 is later. Each slot can hold any unlocked
-// note; the same note can't be in two slots (the picker enforces it).
-// Cooldown is keyed by slot index, not by note. Slot 0 has its own
-// capacity upgrade that lets it stack 2 or 3 notes inside a single pad —
-// when fired, the stack plays as a chord and later notes score
-// coincidences against earlier-emitted partials, so a 2-note stack pays
-// the pair bonus on every tap.
 export const INITIAL_SLOT_COUNT = 1
 export const MAX_SLOT_COUNT = 3
 export const MAX_SLOT0_CAPACITY = 3
 
 // Auto-pluck is per-slot and carries a yield penalty: an auto-fired tap
-// pays this fraction of what a real tap would. Manual play stays the
-// optimal play, auto-pluck is the convenient one.
+// pays this fraction of what a real tap would.
 export const AUTO_PLUCK_PENALTY = 0.5
 
 // Diatonic-color mapping (Newton / Boomwhacker tradition).
@@ -65,31 +48,135 @@ export const PAD_COLORS: Record<string, string> = {
   B: '#9a3ac8', // violet
 }
 
-// Analytic idle rate for a given slot assignment. The on-tab path credits
-// the same numbers via real auto-plucks; this function exists so off-tab
-// accrual matches without running React/canvas.
+// --- Currencies ---------------------------------------------------------
 //
-// Each note in an auto-plucked slot is a virtual "fire participant" — a
-// stacked slot with N notes contributes N participants since they all fire
-// once per cadence. Tone scales linearly with participants. Resonance
-// counts every unordered pair of participants (across all auto-plucked
-// slots), which slightly under-counts the on-tap reality where stacked
-// notes coincide at FULL amplitude (no decay between same-cadence fires)
-// — so the on-tab rate will tend to be a touch higher than this estimate.
-// Manual-only slots don't auto-fire and don't contribute. Both Tone and
-// Resonance are scaled by AUTO_PLUCK_PENALTY since every tick is auto.
+// Every note has its own currency (you mint it by playing that note) and
+// every COINCIDENCE FREQUENCY has its own currency (you mint exactly one
+// unit when two notes' partials align at that frequency, regardless of
+// which two partials happened to coincide there).
+//
+// In the diatonic at H≤6 there are 9 reachable coincidence frequencies,
+// listed below in ascending order. Each frequency is `num/den · tonic`.
+// Two pairs can share a frequency (e.g. F5 is reached by C×E, C×A, and
+// E×A) — they all mint the same currency.
+
+export type NoteCurrency = BodyId
+
+export const FREQ_CURRENCIES = [
+  { key: 'F3', num: 3, den: 1, label: '3' },
+  { key: 'F15_4', num: 15, den: 4, label: '15/4' },
+  { key: 'F4', num: 4, den: 1, label: '4' },
+  { key: 'F9_2', num: 9, den: 2, label: '9/2' },
+  { key: 'F5', num: 5, den: 1, label: '5' },
+  { key: 'F45_8', num: 45, den: 8, label: '45/8' },
+  { key: 'F6', num: 6, den: 1, label: '6' },
+  { key: 'F20_3', num: 20, den: 3, label: '20/3' },
+  { key: 'F15_2', num: 15, den: 2, label: '15/2' },
+] as const
+
+export type FreqCurrency = (typeof FREQ_CURRENCIES)[number]['key']
+
+export const FREQ_CURRENCY_KEYS: readonly FreqCurrency[] = FREQ_CURRENCIES.map(
+  (e) => e.key,
+)
+
+export type CurrencyKey = NoteCurrency | FreqCurrency
+
+export const NOTE_CURRENCIES: readonly NoteCurrency[] = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+export type CurrencyPurse = Partial<Record<CurrencyKey, number>>
+
+// Each coincidence frequency in the diatonic can be reached by one or
+// more interval classes. We store the canonical interval label keyed by
+// freq currency so bursts can name the consonance the player just heard.
+export const FREQ_INTERVAL_LABEL: Record<FreqCurrency, string> = {
+  F3: 'P5',
+  F15_4: 'P5',
+  F4: 'P4',
+  F9_2: 'P4',
+  F5: 'M3',
+  F45_8: 'M6',
+  F6: 'P5',
+  F20_3: 'M3',
+  F15_2: 'm3',
+}
+
+// Cool→warm gradient by ascending frequency so the chip row reads as a
+// spectrum.
+export const FREQ_COLORS: Record<FreqCurrency, string> = {
+  F3: '#5a6cf0',
+  F15_4: '#5a8af0',
+  F4: '#3aa9c8',
+  F9_2: '#3aaaa6',
+  F5: '#3ab07a',
+  F45_8: '#7eb868',
+  F6: '#c9a83a',
+  F20_3: '#dd8a36',
+  F15_2: '#dc4836',
+}
+
+// Convert a coincidence frequency (Hz) to the matching FreqCurrency key,
+// or null if the freq doesn't match any known coincidence (shouldn't
+// happen for diatonic input but defensively handled).
+export function freqToCurrency(hz: number, tonicHz: number): FreqCurrency | null {
+  const r = hz / tonicHz
+  for (const entry of FREQ_CURRENCIES) {
+    const target = entry.num / entry.den
+    if (Math.abs(r - target) / target <= COINCIDENCE_TOL) return entry.key
+  }
+  return null
+}
+
+export function emptyPurse(): CurrencyPurse {
+  return {}
+}
+
+export function addToPurse(purse: CurrencyPurse, delta: CurrencyPurse): CurrencyPurse {
+  const next: CurrencyPurse = { ...purse }
+  for (const k of Object.keys(delta) as CurrencyKey[]) {
+    next[k] = (next[k] ?? 0) + (delta[k] ?? 0)
+  }
+  return next
+}
+
+export function canAfford(purse: CurrencyPurse, cost: CurrencyPurse): boolean {
+  for (const k of Object.keys(cost) as CurrencyKey[]) {
+    if ((purse[k] ?? 0) < (cost[k] ?? 0)) return false
+  }
+  return true
+}
+
+export function subtractCost(purse: CurrencyPurse, cost: CurrencyPurse): CurrencyPurse {
+  const next: CurrencyPurse = { ...purse }
+  for (const k of Object.keys(cost) as CurrencyKey[]) {
+    next[k] = (next[k] ?? 0) - (cost[k] ?? 0)
+  }
+  return next
+}
+
+// Analytic idle rate. Mirrors the on-tap path: each note-fire mints its
+// note currency, and each coincident partial-pair mints exactly one unit
+// of the FreqCurrency for the frequency where the partials lined up.
 export function computeIdleRate(
   slots: ReadonlyArray<ReadonlyArray<BodyId>>,
   autoSlots: ReadonlySet<number>,
-): { tonePerSec: number; resonancePerSec: number } {
+  noteYieldLvls: Partial<Record<BodyId, number>> = {},
+  yieldStep = 1.5,
+): CurrencyPurse {
+  const out: CurrencyPurse = {}
+  const yieldMul = (id: BodyId) => yieldStep ** (noteYieldLvls[id] ?? 0)
+
   const autoNotes: BodyId[] = []
   for (let i = 0; i < slots.length; i++) {
     if (!autoSlots.has(i)) continue
     for (const n of slots[i]) autoNotes.push(n)
   }
-  const tonePerSec = (autoNotes.length * TONE_PER_TAP * AUTO_PLUCK_PENALTY) / RING_DURATION_S
 
-  let resonancePerSec = 0
+  for (const n of autoNotes) {
+    const perSec = (1 * yieldMul(n) * AUTO_PLUCK_PENALTY) / RING_DURATION_S
+    out[n] = (out[n] ?? 0) + perSec
+  }
+
   for (let i = 0; i < autoNotes.length; i++) {
     for (let j = i + 1; j < autoNotes.length; j++) {
       const ba = BODIES.find((x) => x.id === autoNotes[i])
@@ -97,13 +184,16 @@ export function computeIdleRate(
       if (!ba || !bb) continue
       const sa = harmonicSeries(TONIC_HZ * ba.ratio, HARMONIC_COUNT, defaultAmp)
       const sb = harmonicSeries(TONIC_HZ * bb.ratio, HARMONIC_COUNT, defaultAmp)
-      resonancePerSec +=
-        idlePairResonancePerSec(sa, sb, {
-          cadenceS: RING_DURATION_S,
-          gain: RESONANCE_GAIN,
-          tolFrac: COINCIDENCE_TOL,
-        }) * AUTO_PLUCK_PENALTY
+      const counts = idlePairFreqCountsPerSec(sa, sb, {
+        cadenceS: RING_DURATION_S,
+        tolFrac: COINCIDENCE_TOL,
+        keyForFreq: (hz) => freqToCurrency(hz, TONIC_HZ),
+      })
+      for (const [key, perSec] of Object.entries(counts)) {
+        const k = key as FreqCurrency
+        out[k] = (out[k] ?? 0) + perSec * AUTO_PLUCK_PENALTY
+      }
     }
   }
-  return { tonePerSec, resonancePerSec }
+  return out
 }

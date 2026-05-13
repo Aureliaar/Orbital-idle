@@ -100,29 +100,33 @@ export function scanCoincidences(
   return { total, hits }
 }
 
-// Per-pair idle Resonance rate. The auto-pluck loop staggers slots by half a
-// cadence so when slot B fires, slot A's cloud is half-decayed and vice-versa
-// — we model that by scanning B's incoming series against A's series at half
-// amplitude (`cloudAmpFrac = 0.5`). Each slot fires once per cadence, so the
-// scan total counts twice per cadence period (once per direction). Pure
-// function so on-tab auto-pluck income and off-tab analytic accrual stay in
-// sync.
-export function idlePairResonancePerSec(
+// Per-frequency idle harvest rate. Each pair of auto-plucked notes (A, B)
+// lands its partial-pair coincidences twice per cadence (A→B and B→A).
+// Each coincidence event mints exactly one unit of the currency keyed by
+// the coincidence frequency — `keyForFreq` does the lookup (returns null
+// for frequencies outside the harvestable set). Pure function so off-tab
+// idle accrual mirrors the on-tab credit exactly.
+export function idlePairFreqCountsPerSec(
   seriesA: Array<{ partial: number; freq: number; amp: number }>,
   seriesB: Array<{ partial: number; freq: number; amp: number }>,
-  opts: { cadenceS: number; gain: number; tolFrac?: number; cloudAmpFrac?: number },
-): number {
-  const cloudAmpFrac = opts.cloudAmpFrac ?? 0.5
+  opts: {
+    cadenceS: number
+    tolFrac?: number
+    keyForFreq: (hz: number) => string | null
+  },
+): Record<string, number> {
   const tol = opts.tolFrac ?? 0.005
-  const aAsCloud: Harmonic[] = seriesA.map((h) => ({
-    noteId: '_a',
-    partial: h.partial,
-    freq: h.freq,
-    amp: h.amp * cloudAmpFrac,
-    bornAmp: h.amp,
-    bornAt: 0,
-  }))
-  const { total } = scanCoincidences(aAsCloud, seriesB, { tolFrac: tol, gain: opts.gain })
-  // total = bonus from one cross-pluck. Both directions fire each cadence.
-  return (2 * total) / opts.cadenceS
+  const out: Record<string, number> = {}
+  // Two cross-plucks per cadence (A→B then B→A) means one logical pair
+  // mints currency twice per cadence period.
+  const eventsPerSec = 2 / opts.cadenceS
+  for (const a of seriesA) {
+    for (const b of seriesB) {
+      if (!isCoincident(a.freq, b.freq, tol)) continue
+      const key = opts.keyForFreq((a.freq + b.freq) / 2)
+      if (!key) continue
+      out[key] = (out[key] ?? 0) + eventsPerSec
+    }
+  }
+  return out
 }
