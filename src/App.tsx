@@ -253,17 +253,26 @@ function CostChips({
     const v = cost[k]
     if (v) entries.push({ k, label: displayCurrencyKey(k), v, color: FREQ_COLORS[k] })
   }
+  const bottleneckK = purse ? findBottleneck(cost, purse)?.k ?? null : null
   return (
     <span className="cost-chips" aria-label={formatCost(cost)}>
       {entries.map(({ k, label, v, color }) => {
         const have = purse ? Math.floor(purse[k] ?? 0) : null
         const need = v
         const short = have !== null && have < need
+        const isBottleneck = k === bottleneckK
+        const prog =
+          purse !== undefined ? Math.min(1, (purse[k] ?? 0) / need) : 1
         return (
           <span
             key={k}
-            className={`cost-chip${short ? ' short' : have !== null ? ' ok' : ''}`}
-            style={{ ['--chip-color' as string]: color }}
+            className={`cost-chip${short ? ' short' : have !== null ? ' ok' : ''}${
+              isBottleneck ? ' bottleneck' : ''
+            }`}
+            style={{
+              ['--chip-color' as string]: color,
+              ['--p' as string]: prog.toFixed(3),
+            }}
             title={
               have !== null
                 ? `${have} / ${need} ${label}`
@@ -282,6 +291,7 @@ function CostChips({
                 need
               )}
             </span>
+            {have !== null && <span className="cost-chip-bar" aria-hidden="true" />}
           </span>
         )
       })}
@@ -303,6 +313,60 @@ function costProgress(purse: CurrencyPurse, cost: CurrencyPurse): number {
     if (ratio < min) min = ratio
   }
   return any ? min : 1
+}
+
+type Bottleneck = {
+  k: CurrencyKey
+  shortBy: number
+  color: string
+  label: string
+}
+
+// Bottleneck = the cost currency the player has the smallest share of.
+// Drives both the "need N more X" hint at the bottom of each card and the
+// dashed-emphasis on the offending cost chip, so the player can see at a
+// glance which currency is gating the buy without scanning every chip.
+function findBottleneck(cost: CurrencyPurse, purse: CurrencyPurse): Bottleneck | null {
+  let worst: Bottleneck | null = null
+  let worstProg = Infinity
+  for (const k of Object.keys(cost) as CurrencyKey[]) {
+    const need = cost[k] ?? 0
+    if (need <= 0) continue
+    const have = purse[k] ?? 0
+    if (have >= need) continue
+    const prog = have / need
+    if (prog < worstProg) {
+      worstProg = prog
+      const isNote = (NOTE_CURRENCIES as readonly string[]).includes(k)
+      worst = {
+        k,
+        shortBy: Math.max(1, Math.ceil(need - have)),
+        color: isNote ? PAD_COLORS[k] ?? 'var(--text)' : FREQ_COLORS[k as FreqCurrency],
+        label: displayCurrencyKey(k),
+      }
+    }
+  }
+  return worst
+}
+
+function ShortHint({ cost, purse }: { cost: CurrencyPurse; purse: CurrencyPurse }) {
+  const b = findBottleneck(cost, purse)
+  if (!b) return null
+  return (
+    <span className="card-short">
+      <span className="card-short-arrow" aria-hidden="true">↳</span>
+      need <strong>{b.shortBy}</strong> more{' '}
+      <span className="card-short-cur" style={{ color: b.color }}>{b.label}</span>
+    </span>
+  )
+}
+
+function ReadyBadge() {
+  return (
+    <span className="card-ready" aria-label="Ready to buy">
+      <span aria-hidden="true">▶</span> Ready
+    </span>
+  )
 }
 
 function App() {
@@ -795,7 +859,10 @@ function App() {
     [noteYieldLvls, spendIfAffordable],
   )
 
-  const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
+  // Progressive disclosure: only show 1 card per category at any time so the
+  // panel stays a punch-list of the next concrete action, not a wall of
+  // hypotheticals. Once the player buys it, the next candidate slides in.
+  const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 1)
   const nextSlotIdx = slotCount + 1
   const slotGate = SLOT_UNLOCK_GATES[nextSlotIdx]
   const slotGatePassed = slotGate ? unlockedIds.includes(slotGate) : true
@@ -809,8 +876,40 @@ function App() {
   const canAffordSlot0Cap = slot0CapCost ? canAffordPurse(currencies, slot0CapCost) : false
   const autoPluckGate = unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
   const autoPluckSlotsToOffer = autoPluckGate
-    ? Array.from({ length: slotCount }, (_, i) => i).filter((i) => !autoPluckSlots.has(i))
+    ? Array.from({ length: slotCount }, (_, i) => i)
+        .filter((i) => !autoPluckSlots.has(i))
+        .slice(0, 1)
     : []
+
+  // Yield candidate: among every unlocked note's next-level upgrade, surface
+  // only the most promising — affordable first, then closest to affordable,
+  // then cheapest by level. Hides the bulk of "you'll get here eventually"
+  // cards that would otherwise crowd the panel.
+  type YieldOption = {
+    id: BodyId
+    lvl: number
+    cost: CurrencyPurse
+    costNote: BodyId
+    gateUnlocked: boolean
+    progress: number
+    affordable: boolean
+  }
+  const yieldOptions: YieldOption[] = unlockedIds.map((id) => {
+    const lvl = noteYieldLvls[id] ?? 0
+    const cost = noteYieldCost(id, lvl)
+    const costNote = FIFTH_NEXT[id]
+    const gateUnlocked = unlockedIds.includes(costNote)
+    const progress = gateUnlocked ? costProgress(currencies, cost) : 0
+    const affordable = gateUnlocked && canAffordPurse(currencies, cost)
+    return { id, lvl, cost, costNote, gateUnlocked, progress, affordable }
+  })
+  const visibleYieldOption: YieldOption | undefined = [...yieldOptions]
+    .sort((a, b) => {
+      if (a.affordable !== b.affordable) return a.affordable ? -1 : 1
+      if (a.gateUnlocked !== b.gateUnlocked) return a.gateUnlocked ? -1 : 1
+      if (a.progress !== b.progress) return b.progress - a.progress
+      return a.lvl - b.lvl
+    })[0]
 
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
@@ -1065,8 +1164,10 @@ function App() {
                             />
                             {id}
                           </span>
+                          {affordable && <ReadyBadge />}
                         </header>
                         <CostChips cost={cost} purse={currencies} />
+                        {!affordable && <ShortHint cost={cost} purse={currencies} />}
                         <span
                           className="unlock-progress"
                           style={{ ['--p' as string]: progress.toFixed(3) }}
@@ -1078,7 +1179,7 @@ function App() {
                           disabled={!affordable}
                           onClick={() => handleUnlock(id)}
                         >
-                          Unlock
+                          Unlock {id}
                         </button>
                       </li>
                     )
@@ -1091,6 +1192,7 @@ function App() {
                       <header className="unlock-head">
                         <span className="unlock-kind">Slot</span>
                         <span className="unlock-title">Slot {nextSlotIdx}</span>
+                        {canAffordSlot && <ReadyBadge />}
                       </header>
                       <span className="unlock-desc">
                         {nextSlotIdx === 2
@@ -1098,6 +1200,7 @@ function App() {
                           : '3-note resonance unlocks'}
                       </span>
                       <CostChips cost={nextSlotCost} purse={currencies} />
+                      {!canAffordSlot && <ShortHint cost={nextSlotCost} purse={currencies} />}
                       <span
                         className="unlock-progress"
                         style={{
@@ -1111,7 +1214,7 @@ function App() {
                         disabled={!canAffordSlot}
                         onClick={handleUnlockSlot}
                       >
-                        Unlock
+                        Unlock slot {nextSlotIdx}
                       </button>
                     </li>
                   )}
@@ -1125,9 +1228,13 @@ function App() {
                         <span className="unlock-title">
                           Slot 1 · {slot0Capacity} → {nextSlot0Cap}
                         </span>
+                        {canAffordSlot0Cap && <ReadyBadge />}
                       </header>
                       <span className="unlock-desc">play a chord on every tap</span>
                       <CostChips cost={slot0CapCost} purse={currencies} />
+                      {!canAffordSlot0Cap && (
+                        <ShortHint cost={slot0CapCost} purse={currencies} />
+                      )}
                       <span
                         className="unlock-progress"
                         style={{
@@ -1141,7 +1248,7 @@ function App() {
                         disabled={!canAffordSlot0Cap}
                         onClick={handleUpgradeSlot0Capacity}
                       >
-                        Upgrade
+                        Stack to {nextSlot0Cap}
                       </button>
                     </li>
                   )}
@@ -1158,9 +1265,11 @@ function App() {
                         <header className="unlock-head">
                           <span className="unlock-kind">Auto ⚡</span>
                           <span className="unlock-title">Slot {slotIdx + 1}</span>
+                          {affordable && <ReadyBadge />}
                         </header>
                         <span className="unlock-desc">half yield, fires itself</span>
                         <CostChips cost={cost} purse={currencies} />
+                        {!affordable && <ShortHint cost={cost} purse={currencies} />}
                         <span
                           className="unlock-progress"
                           style={{ ['--p' as string]: progress.toFixed(3) }}
@@ -1172,7 +1281,7 @@ function App() {
                           disabled={!affordable}
                           onClick={() => handleUnlockAutoPluck(slotIdx)}
                         >
-                          Unlock
+                          Auto-pluck slot {slotIdx + 1}
                         </button>
                       </li>
                     )
@@ -1180,7 +1289,7 @@ function App() {
                 </ul>
               </div>
             )}
-            {unlockedIds.length > 0 && (
+            {visibleYieldOption && (
               <div className="prog-section prog-upgrades">
                 <h3 className="prog-h">
                   <span className="prog-h-label">Yield</span>
@@ -1189,20 +1298,15 @@ function App() {
                   </span>
                 </h3>
                 <ul className="upgrades" role="list" aria-label="Per-note yield upgrades">
-                  {unlockedIds.map((id) => {
-                    const lvl = noteYieldLvls[id] ?? 0
-                    const mul = noteYieldMultiplier(lvl)
-                    const cost = noteYieldCost(id, lvl)
-                    const costNote = FIFTH_NEXT[id]
-                    const gateUnlocked = unlockedIds.includes(costNote)
-                    const affordable = gateUnlocked && canAffordPurse(currencies, cost)
+                  {(() => {
+                    const opt = visibleYieldOption
+                    const mul = noteYieldMultiplier(opt.lvl)
                     const nextMul = mul * YIELD_STEP
-                    const progress = gateUnlocked ? costProgress(currencies, cost) : 0
-                    const color = PAD_COLORS[id] ?? 'var(--text)'
+                    const color = PAD_COLORS[opt.id] ?? 'var(--text)'
                     return (
                       <li
-                        key={id}
-                        className={`upgrade upgrade-note${gateUnlocked ? '' : ' locked'}${affordable ? ' affordable' : ''}`}
+                        key={opt.id}
+                        className={`upgrade upgrade-note${opt.gateUnlocked ? '' : ' locked'}${opt.affordable ? ' affordable' : ''}`}
                         style={{ ['--chip-color' as string]: color }}
                       >
                         <header className="upgrade-head-row">
@@ -1211,38 +1315,42 @@ function App() {
                             aria-hidden="true"
                             style={{ background: color }}
                           />
-                          <span className="upgrade-name">{id}</span>
-                          <span className="upgrade-lvl">lvl {lvl}</span>
+                          <span className="upgrade-name">{opt.id}</span>
+                          <span className="upgrade-lvl">lvl {opt.lvl}</span>
+                          {opt.affordable && <ReadyBadge />}
                         </header>
                         <div className="upgrade-mul-row" aria-hidden="true">
-                          <span key={lvl} className="upgrade-mul">×{mul.toFixed(2)}</span>
+                          <span key={opt.lvl} className="upgrade-mul">×{mul.toFixed(2)}</span>
                           <span className="upgrade-arrow">→</span>
                           <span className="upgrade-mul upgrade-mul-next">×{nextMul.toFixed(2)}</span>
                         </div>
-                        {gateUnlocked ? (
-                          <CostChips cost={cost} purse={currencies} />
+                        {opt.gateUnlocked ? (
+                          <CostChips cost={opt.cost} purse={currencies} />
                         ) : (
                           <span className="upgrade-locked-msg">
-                            unlock <strong>{costNote}</strong> first
+                            unlock <strong>{opt.costNote}</strong> first to upgrade
                           </span>
+                        )}
+                        {opt.gateUnlocked && !opt.affordable && (
+                          <ShortHint cost={opt.cost} purse={currencies} />
                         )}
                         <span
                           className="upgrade-progress"
-                          style={{ ['--p' as string]: progress.toFixed(3) }}
+                          style={{ ['--p' as string]: opt.progress.toFixed(3) }}
                           aria-hidden="true"
                         />
                         <button
                           type="button"
                           className="upgrade-btn"
-                          disabled={!affordable}
-                          onClick={() => buyNoteYield(id)}
-                          aria-label={`Upgrade ${id} yield to lvl ${lvl + 1} (×${nextMul.toFixed(2)})`}
+                          disabled={!opt.affordable}
+                          onClick={() => buyNoteYield(opt.id)}
+                          aria-label={`Upgrade ${opt.id} yield to lvl ${opt.lvl + 1} (×${nextMul.toFixed(2)})`}
                         >
-                          Upgrade
+                          Upgrade {opt.id} · ×{nextMul.toFixed(2)}
                         </button>
                       </li>
                     )
-                  })}
+                  })()}
                 </ul>
               </div>
             )}
