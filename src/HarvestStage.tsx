@@ -6,15 +6,17 @@ import type { BodyId } from './bodies'
 import {
   AUTO_PLUCK_PENALTY,
   COINCIDENCE_TOL,
+  FREQ_CURRENCIES,
+  FREQ_INTERVAL_LABEL,
   HARMONIC_COUNT,
   MAX_SLOT_COUNT,
   PAD_COLORS,
-  RESONANCE_GAIN,
   RING_DURATION_MS,
   RING_DURATION_S,
-  TONE_PER_TAP,
   TONIC_HZ,
+  freqToCurrency,
 } from './harvest-config'
+import type { CurrencyPurse } from './harvest-config'
 import {
   defaultAmp,
   harmonicSeries,
@@ -36,7 +38,13 @@ const SLOT_KEYS = ['a', 's', 'd', 'f']
 const AUTO_CADENCE_MS = RING_DURATION_MS
 const AUTO_STAGGER_MS = RING_DURATION_MS / 2
 
-type Burst = { id: number; freq: number; bornMs: number; magnitude: number }
+type Burst = {
+  id: number
+  freq: number
+  bornMs: number
+  magnitude: number
+  label: string
+}
 
 type Props = {
   unlockedIds: readonly BodyId[]
@@ -44,9 +52,9 @@ type Props = {
   slotCount: number
   slotCapacities: readonly number[]
   autoPluckSlots: ReadonlySet<number>
+  noteYieldMul: (id: BodyId) => number
   onSlotChange: (slotIdx: number, newNotes: readonly BodyId[]) => void
-  onTone: (delta: number) => void
-  onResonance: (delta: number) => void
+  onEarn: (delta: CurrencyPurse) => void
 }
 
 export function HarvestStage({
@@ -55,9 +63,9 @@ export function HarvestStage({
   slotCount,
   slotCapacities,
   autoPluckSlots,
+  noteYieldMul,
   onSlotChange,
-  onTone,
-  onResonance,
+  onEarn,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
@@ -77,15 +85,15 @@ export function HarvestStage({
   )
   const slotsRef = useRef(slots)
   const autoSlotsRef = useRef(autoPluckSlots)
-  const onToneRef = useRef(onTone)
-  const onResonanceRef = useRef(onResonance)
+  const onEarnRef = useRef(onEarn)
+  const noteYieldMulRef = useRef(noteYieldMul)
 
   useEffect(() => {
-    onToneRef.current = onTone
-  }, [onTone])
+    onEarnRef.current = onEarn
+  }, [onEarn])
   useEffect(() => {
-    onResonanceRef.current = onResonance
-  }, [onResonance])
+    noteYieldMulRef.current = noteYieldMul
+  }, [noteYieldMul])
   useEffect(() => {
     slotsRef.current = slots
   }, [slots])
@@ -223,9 +231,9 @@ export function HarvestStage({
       for (const b of bursts) {
         const u = (now - b.bornMs) / BURST_MS
         const x = xOf(b.freq)
-        const y = baselineY - stickMax * 0.5
+        const y = baselineY - stickMax * 0.55
         const r = 6 + 28 * u * Math.min(1, b.magnitude * 4)
-        const alpha = (1 - u) * 0.75
+        const alpha = (1 - u) * 0.85
         ctx2d.fillStyle = withAlpha(accent, alpha * 0.35)
         ctx2d.beginPath()
         ctx2d.arc(x, y, r, 0, 2 * Math.PI)
@@ -235,6 +243,16 @@ export function HarvestStage({
         ctx2d.beginPath()
         ctx2d.arc(x, y, r, 0, 2 * Math.PI)
         ctx2d.stroke()
+        if (b.label) {
+          // Label floats up over the burst's life so successive hits read
+          // as a stack of named rewards rather than overlapping rings.
+          const rise = 22 + 18 * u
+          ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
+          ctx2d.textAlign = 'center'
+          ctx2d.textBaseline = 'middle'
+          ctx2d.fillStyle = withAlpha(accent, alpha)
+          ctx2d.fillText(b.label, x, y - rise)
+        }
       }
 
       if (cloud.length === 0 && bursts.length === 0) {
@@ -268,13 +286,21 @@ export function HarvestStage({
   // Core slot trigger — manual taps, keyboard, and auto-pluck all route
   // through here so the cooldown / coincidence / audio / cloud paths stay
   // identical regardless of who fired. Auto-fired plucks pay a yield
-  // penalty (AUTO_PLUCK_PENALTY) on Tone + Resonance so manual play is
+  // penalty (AUTO_PLUCK_PENALTY) on every currency so manual play is
   // strictly better when the player is at the keyboard.
+  //
+  // Currency mint, per stack-fire:
+  //   - 1 unit of NoteCurrency[noteId] per note in the stack (× per-note
+  //     yield × auto penalty).
+  //   - For every coincident partial pair, exactly +1 unit of the
+  //     FreqCurrency for the frequency at which the partials lined up.
+  //     C×E lining up at 5·tonic mints F5 — no matter which partials of
+  //     each note happened to coincide.
   //
   // A slot can hold a stack of notes (slot 0's capacity upgrade). The
   // stack fires sequentially in array order — each note scans the cloud
   // *after* the previous note's partials have been added to it, so a
-  // 2-note stack pays the chord's pair bonus on every tap at FULL
+  // 2-note stack pays the chord's coincidence on every tap at FULL
   // amplitude (no decay between same-pluck emits).
   const handleSlot = useCallback((slotIdx: number, opts?: { auto?: boolean }) => {
     const slotsNow = slotsRef.current
@@ -299,31 +325,45 @@ export function HarvestStage({
     }
     const audio = audioRef.current
 
-    const yieldMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
+    const autoMul = opts?.auto ? AUTO_PLUCK_PENALTY : 1
     const now = performance.now()
     const cloud = cloudRef.current
+    const purse: CurrencyPurse = {}
+    const yieldMul = noteYieldMulRef.current
 
     for (const noteId of notes) {
       const body = BODIES.find((b) => b.id === noteId)
       if (!body) continue
 
       const incoming = harmonicSeries(TONIC_HZ * body.ratio, HARMONIC_COUNT, defaultAmp)
-      const { total, hits } = scanCoincidences(cloud, incoming, {
+      const { hits } = scanCoincidences(cloud, incoming, {
         tolFrac: COINCIDENCE_TOL,
-        gain: RESONANCE_GAIN,
+        gain: 1,
       })
 
-      onToneRef.current(TONE_PER_TAP * yieldMul)
-      if (total > 0) {
-        onResonanceRef.current(total * yieldMul)
-        for (const h of hits) {
-          burstsRef.current.push({
-            id: nextBurstIdRef.current++,
-            freq: h.freq,
-            bornMs: now,
-            magnitude: h.bonus,
-          })
+      // Note currency: per-note yield × auto penalty.
+      purse[noteId] = (purse[noteId] ?? 0) + autoMul * yieldMul(noteId)
+
+      for (const h of hits) {
+        const freqKey = freqToCurrency(h.freq, TONIC_HZ)
+        if (freqKey) {
+          purse[freqKey] = (purse[freqKey] ?? 0) + autoMul
         }
+        const interval = freqKey ? FREQ_INTERVAL_LABEL[freqKey] : ''
+        const meta = FREQ_CURRENCIES.find((e) => e.key === freqKey)
+        const ratio = meta ? meta.label : ''
+        const label = freqKey
+          ? interval
+            ? `+f${ratio} · ${interval}`
+            : `+f${ratio}`
+          : ''
+        burstsRef.current.push({
+          id: nextBurstIdRef.current++,
+          freq: h.freq,
+          bornMs: now,
+          magnitude: h.bonus,
+          label,
+        })
       }
 
       if (audio) playPluck(audio, incoming, hits)
@@ -339,6 +379,8 @@ export function HarvestStage({
         })
       }
     }
+
+    onEarnRef.current(purse)
   }, [])
 
   // Auto-pluck timers exist for every potential slot; whether they actually
@@ -680,8 +722,8 @@ export function HarvestStage({
       })()}
       <p className="harvest-hint">
         Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play; swipe
-        left/right to swap its note. Hit another while the first rings — coincident partials pay Resonance.
-        Auto-plucked slots fire themselves at half yield (⚡).
+        left/right to swap its note. Each note mints its own currency; land coincident partials while the first
+        rings to mint a freq currency. Auto-plucked slots fire themselves at half yield (⚡).
       </p>
     </section>
   )
