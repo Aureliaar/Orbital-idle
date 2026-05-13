@@ -194,9 +194,12 @@ export function HarvestStage({
         const nodes: SVGElement[] = []
 
         // Per-pluck spirals: group partials by (noteId, bornAt) so each
-        // pluck's H1→H6 traces its own polyline. All 6 partials share a
-        // bornAt (one performance.now() call per pluck), so the key splits
-        // cleanly even on rapid re-plucks of the same note.
+        // pluck draws its own log-spiral curve. r and θ are both linear in
+        // pitch p = log2(f/tonic), so the curve connecting H1..H6 is
+        // literally an Archimedean spiral in (r, θ) — we sample it densely
+        // (16 segments per partial-step) using the *un-wrapped* angle so
+        // every octave traces a full revolution rather than snapping back
+        // to 0 at the chroma seam.
         const groups = new Map<string, Harmonic[]>()
         for (const h of cloud) {
           const k = `${h.noteId}:${h.bornAt}`
@@ -204,23 +207,34 @@ export function HarvestStage({
           if (arr) arr.push(h)
           else groups.set(k, [h])
         }
+        const SPIRAL_STEPS_PER_PARTIAL = 16
         for (const g of groups.values()) {
           if (g.length < 2) continue
           g.sort((a, b) => a.partial - b.partial)
           const first = g[0]
+          const last = g[g.length - 1]
           const norm = Math.max(0, Math.min(1, first.amp / Math.max(first.bornAmp, 1e-6)))
           if (norm <= 0.05) continue
+          const fund = first.freq / first.partial
+          const steps = Math.max(2, (last.partial - first.partial) * SPIRAL_STEPS_PER_PARTIAL)
           let d = ''
-          for (let i = 0; i < g.length; i++) {
-            const [x, y] = polar(g[i].freq)
-            d += `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)} `
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps
+            const n = first.partial + (last.partial - first.partial) * t
+            const freq = fund * n
+            const p = pitchOf(freq)
+            const ang = p * 2 * Math.PI - Math.PI / 2 // un-wrapped: each octave = one revolution
+            const r = R_BASE + (R_OUTER - R_BASE) * Math.min(1, p / P_MAX)
+            const x = CX + r * Math.cos(ang)
+            const y = CY + r * Math.sin(ang)
+            d += `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)} `
           }
           const path = document.createElementNS(SVG_NS, 'path')
           path.setAttribute('d', d.trim())
           path.setAttribute('fill', 'none')
           path.setAttribute('stroke', PAD_COLORS[first.noteId] ?? '#aa3bff')
-          path.setAttribute('stroke-opacity', String(norm * 0.55))
-          path.setAttribute('stroke-width', '1.75')
+          path.setAttribute('stroke-opacity', String(norm * 0.6))
+          path.setAttribute('stroke-width', '2')
           path.setAttribute('stroke-linecap', 'round')
           path.setAttribute('stroke-linejoin', 'round')
           nodes.push(path)
@@ -229,28 +243,28 @@ export function HarvestStage({
         for (const h of cloud) {
           const [x, y] = polar(h.freq)
           const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
-          const opacity = Math.max(0.2, norm)
+          const opacity = Math.max(0.25, norm)
           const color = PAD_COLORS[h.noteId] ?? '#aa3bff'
           const isFund = h.partial === 1
-          const dotR = isFund ? 9 : Math.max(2.6, 6.5 / h.partial)
+          const dotR = isFund ? 12 : Math.max(4, 8 / h.partial)
 
           const dot = document.createElementNS(SVG_NS, 'circle')
           dot.setAttribute('cx', x.toFixed(2))
           dot.setAttribute('cy', y.toFixed(2))
           dot.setAttribute('r', dotR.toFixed(2))
           dot.setAttribute('fill', color)
-          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.9)))
+          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.95)))
           nodes.push(dot)
 
           if (isFund) {
             const ring = document.createElementNS(SVG_NS, 'circle')
             ring.setAttribute('cx', x.toFixed(2))
             ring.setAttribute('cy', y.toFixed(2))
-            ring.setAttribute('r', (dotR + 3).toFixed(2))
+            ring.setAttribute('r', (dotR + 3.5).toFixed(2))
             ring.setAttribute('fill', 'none')
             ring.setAttribute('stroke', color)
             ring.setAttribute('stroke-opacity', String(opacity * 0.9))
-            ring.setAttribute('stroke-width', '1.5')
+            ring.setAttribute('stroke-width', '1.75')
             nodes.push(ring)
           }
         }
