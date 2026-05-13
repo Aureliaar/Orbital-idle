@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
 import { BODIES, ratioLabel as toRatioLabel } from './bodies'
@@ -27,7 +27,8 @@ import type { Coincidence, Harmonic } from './harmonics'
 const PLUCK_GAIN = 0.18
 const PLUCK_HIT_BOOST = 2.2
 
-const BURST_MS = 600
+const BURST_MS = 900
+const GLOW_LIFE_MS = 600
 
 const SLOT_KEYS = ['a', 's', 'd', 'f']
 
@@ -38,12 +39,115 @@ const SLOT_KEYS = ['a', 's', 'd', 'f']
 const AUTO_CADENCE_MS = RING_DURATION_MS
 const AUTO_STAGGER_MS = RING_DURATION_MS / 2
 
+// Pitch-helix visualizer math. A frequency `f` maps to pitch `p =
+// log2(f/tonic)` (octaves above tonic), and from there to a polar position:
+//   radius = r₀ + (rMax − r₀) · (p / P_MAX)         — climbs one ring per octave
+//   angle  = ((p mod 1) · 2π) − π/2                 — chroma; C sits at top
+// Because every frequency lands on a single (r, θ), coincident partials
+// (e.g. C·H3 and G·H2 at 392 Hz) overlap as the same dot — coincidence is
+// literal visual overlap, no rotating chord needed. P_MAX is the pitch of
+// the highest reachable partial (B·H_HARMONIC_COUNT) so the outermost ring
+// always lines up with the ladder's ceiling.
+const P_MAX = Math.log2((15 / 8) * HARMONIC_COUNT)
+
+const pitchOf = (freq: number) => Math.log2(freq / TONIC_HZ)
+const chromaAngleOf = (freq: number) => {
+  const p = pitchOf(freq)
+  const frac = ((p % 1) + 1) % 1
+  return frac * 2 * Math.PI - Math.PI / 2
+}
+
+// SVG viewBox + geometry. The container is square (CSS aspect-ratio: 1),
+// so the viewBox is too — no wasted horizontal space, and the helix fills
+// the disc. Fixed coordinate system means the renderer never has to listen
+// for resize; the CSS scales the <svg> and preserveAspectRatio keeps the
+// helix centred at any aspect ratio.
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const VIEW_W = 400
+const VIEW_H = 400
+const CX = VIEW_W / 2
+const CY = VIEW_H / 2
+const R_OUTER = 180
+const R_BASE = 64
+
+const radiusOf = (freq: number) => {
+  const p = Math.max(0, pitchOf(freq))
+  return R_BASE + (R_OUTER - R_BASE) * Math.min(1, p / P_MAX)
+}
+const polar = (freq: number): [number, number] => {
+  const r = radiusOf(freq)
+  const a = chromaAngleOf(freq)
+  return [CX + r * Math.cos(a), CY + r * Math.sin(a)]
+}
+
+// Locate the currency chip for `key` and return its centre in the helix
+// SVG's viewBox coords, or null if the chip isn't mounted (locked currency,
+// different tab, etc.). With aspect-ratio:1 on the SVG and a square
+// viewBox, the per-axis scale is uniform, so a single ratio converts both
+// axes — and points outside the viewBox (the chips sit above it) come back
+// with negative y, which is exactly what overflow:visible lets us render.
+function chipTargetVB(key: string, svgEl: SVGSVGElement | null): [number, number] | null {
+  if (!svgEl) return null
+  const chip = document.querySelector(`[data-cur-key="${key}"]`) as HTMLElement | null
+  if (!chip) return null
+  const chipRect = chip.getBoundingClientRect()
+  const svgRect = svgEl.getBoundingClientRect()
+  if (svgRect.width === 0 || svgRect.height === 0) return null
+  const scale = VIEW_W / svgRect.width
+  const x = (chipRect.left + chipRect.width / 2 - svgRect.left) * scale
+  const y = (chipRect.top + chipRect.height / 2 - svgRect.top) * scale
+  return [x, y]
+}
+
 type Burst = {
   id: number
   freq: number
   bornMs: number
   magnitude: number
+  // Floating currency reward label from main (e.g. "+f3:2 · P5"); empty
+  // string when the coincidence falls outside the harvestable set.
   label: string
+  // Note colors of the two coincident partials. The halo is blended from
+  // these; the floating label adopts the blend too so the reward visually
+  // ties back to the notes that produced it.
+  colorIn: string
+  colorCloud: string
+}
+
+// Soft "noticed" feedback: a single partial just landed on a coincidence
+// hint, but no second partial is there yet to actually trigger a payout.
+// One brief expanding ring in the partial's color over the hint slot.
+type HintGlow = {
+  id: number
+  freq: number
+  bornMs: number
+  color: string
+}
+
+// Full "properly hit" feedback: a coincidence fired and minted currency.
+// Each particle eases from its spawn point to a target — usually the DOM
+// rect of the currency chip the payout went to (looked up via
+// `data-cur-key`), so the reward visually arrives where the counter ticks
+// up. The path is a quadratic Bezier with a perpendicular-offset control
+// point so the particle arcs rather than running straight, and the cohort
+// is born staggered (bornMs is in the future for later indices) so the
+// shower trickles out like an arpeggio. Falls back to a fan above the
+// helix when the chip can't be located.
+type Particle = {
+  id: number
+  x0: number
+  y0: number
+  // Quadratic Bezier control point — offset perpendicular to the source→
+  // target line by a per-particle signed magnitude, so each particle
+  // bends a different way and the cohort fans into arcs.
+  cx: number
+  cy: number
+  tx: number
+  ty: number
+  bornMs: number
+  life: number
+  color: string
+  size: number
 }
 
 type Props = {
@@ -67,10 +171,17 @@ export function HarvestStage({
   onSlotChange,
   onEarn,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const cloudGroupRef = useRef<SVGGElement>(null)
+  const burstGroupRef = useRef<SVGGElement>(null)
+  const glowGroupRef = useRef<SVGGElement>(null)
+  const particleGroupRef = useRef<SVGGElement>(null)
+  const emptyHintRef = useRef<SVGTextElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
+  const hintGlowsRef = useRef<HintGlow[]>([])
+  const particlesRef = useRef<Particle[]>([])
   const nextBurstIdRef = useRef(1)
   const coolingRef = useRef<Set<number>>(new Set())
   const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
@@ -88,6 +199,52 @@ export function HarvestStage({
   const onEarnRef = useRef(onEarn)
   const noteYieldMulRef = useRef(noteYieldMul)
 
+  // Set of every note currently in any slot. Used to highlight chroma-compass
+  // anchors so the player can read which notes are loaded without having to
+  // glance down at the pads.
+  const slotted = useMemo(() => {
+    const s = new Set<BodyId>()
+    for (const slotNotes of slots) for (const id of slotNotes) s.add(id)
+    return s
+  }, [slots])
+
+  // Every coincidence spot reachable with the currently-unlocked notes:
+  // frequencies where two or more notes' harmonic series intersect. Solo
+  // partial positions are dropped — they're math markers, not gameplay
+  // anchors. Start at H2 because the chroma compass already covers H1.
+  const harmonicHints = useMemo(() => {
+    type Hint = { freq: number; colors: string[]; key: string }
+    const map = new Map<string, Hint>()
+    for (const id of unlockedIds) {
+      const body = BODIES.find((b) => b.id === id)
+      if (!body) continue
+      const color = PAD_COLORS[id]
+      for (let n = 2; n <= HARMONIC_COUNT; n++) {
+        const freq = TONIC_HZ * body.ratio * n
+        const key = freq.toFixed(3)
+        const existing = map.get(key)
+        if (existing) {
+          if (!existing.colors.includes(color)) existing.colors.push(color)
+        } else {
+          map.set(key, { freq, colors: [color], key })
+        }
+      }
+    }
+    return Array.from(map.values()).filter((h) => h.colors.length > 1)
+  }, [unlockedIds])
+
+  // Fast lookup the rAF/handleSlot paths use to decide whether a partial
+  // just landed on a hint slot (triggering the soft glow feedback).
+  const hintFreqSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const h of harmonicHints) s.add(h.key)
+    return s
+  }, [harmonicHints])
+  const hintFreqSetRef = useRef(hintFreqSet)
+  useEffect(() => {
+    hintFreqSetRef.current = hintFreqSet
+  }, [hintFreqSet])
+
   useEffect(() => {
     onEarnRef.current = onEarn
   }, [onEarn])
@@ -101,22 +258,14 @@ export function HarvestStage({
     autoSlotsRef.current = autoPluckSlots
   }, [autoPluckSlots])
 
-  // rAF: decay cloud + bursts, redraw spectrum strip.
+  // rAF: decay the cloud + bursts, then push their current state into the
+  // two dynamic SVG groups. The static layer (octave rings, base ring,
+  // chroma compass) is declared in JSX below and never touched here —
+  // React handles slot-driven changes via re-render.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx2d = canvas.getContext('2d')
-    if (!ctx2d) return
-
     let raf = 0
     let last = performance.now()
-
-    // Spectrum X-axis is fixed across the full diatonic ladder (max ratio =
-    // B at 15/8, max partial = HARMONIC_COUNT) so the scale doesn't jump as
-    // the player unlocks more notes.
-    const maxRatio = BODIES.reduce((m, b) => (b.ratio > m ? b.ratio : m), 1)
-    const fMin = TONIC_HZ * 0.95
-    const fMax = TONIC_HZ * maxRatio * HARMONIC_COUNT * 1.05
+    let wasEmpty: boolean | null = null
 
     const draw = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000)
@@ -138,131 +287,250 @@ export function HarvestStage({
       }
       bursts.length = bw
 
-      const dpr = window.devicePixelRatio || 1
-      const cssW = canvas.clientWidth
-      const cssH = canvas.clientHeight
-      if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
-        canvas.width = Math.max(1, cssW * dpr)
-        canvas.height = Math.max(1, cssH * dpr)
+      // Hint glows fade over GLOW_LIFE_MS; particles fly outward then fade
+      // over their per-particle life. Both decay arrays in-place to avoid
+      // GC pressure at 60 fps.
+      const glows = hintGlowsRef.current
+      let gW = 0
+      for (let i = 0; i < glows.length; i++) {
+        if (now - glows[i].bornMs < GLOW_LIFE_MS) glows[gW++] = glows[i]
       }
-      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx2d.clearRect(0, 0, cssW, cssH)
+      glows.length = gW
 
-      const styles = getComputedStyle(document.documentElement)
-      const accent = styles.getPropertyValue('--accent').trim() || '#aa3bff'
-      const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
-      const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
-
-      const padX = 14
-      const xOf = (f: number) => {
-        const u = Math.log(f / fMin) / Math.log(fMax / fMin)
-        return padX + (cssW - 2 * padX) * Math.max(0, Math.min(1, u))
+      const particles = particlesRef.current
+      let pW = 0
+      for (let i = 0; i < particles.length; i++) {
+        const part = particles[i]
+        // bornMs can be in the future for staggered launches — keep those.
+        // Only drop a particle once its full life has elapsed past bornMs.
+        if (now >= part.bornMs && now - part.bornMs >= part.life) continue
+        particles[pW++] = part
       }
-      const baselineY = cssH - 18
+      particles.length = pW
 
-      ctx2d.strokeStyle = border
-      ctx2d.lineWidth = 1
-      ctx2d.beginPath()
-      ctx2d.moveTo(0, baselineY)
-      ctx2d.lineTo(cssW, baselineY)
-      ctx2d.stroke()
-      ctx2d.font = '10px ui-monospace, Menlo, Consolas, monospace'
-      ctx2d.textAlign = 'center'
-      ctx2d.textBaseline = 'top'
+      const cloudG = cloudGroupRef.current
+      if (cloudG) {
+        const nodes: SVGElement[] = []
 
-      // Tick + letter for each currently-slotted note. Same-note exclusion
-      // means a note appears at most once even across stacked slot 0.
-      const slotsNow = slotsRef.current
-      const drawnNotes = new Set<BodyId>()
-      for (const slotNotes of slotsNow) {
-        for (const id of slotNotes) {
-          if (drawnNotes.has(id)) continue
-          drawnNotes.add(id)
-          const body = BODIES.find((b) => b.id === id)
-          if (!body) continue
-          const x = xOf(TONIC_HZ * body.ratio)
-          const color = PAD_COLORS[id] ?? accent
-          ctx2d.strokeStyle = color
-          ctx2d.beginPath()
-          ctx2d.moveTo(x, baselineY)
-          ctx2d.lineTo(x, baselineY + 4)
-          ctx2d.stroke()
-          ctx2d.fillStyle = withAlpha(color, 0.85)
-          ctx2d.fillText(id, x, baselineY + 6)
+        // Per-pluck spirals: group partials by (noteId, bornAt) so each
+        // pluck draws its own log-spiral curve. r and θ are both linear in
+        // pitch p = log2(f/tonic), so the underlying curve is a true
+        // Archimedean spiral. SVG has no native spiral primitive (Beziers
+        // are polynomial, spirals are transcendental), but the standard
+        // trick — chain cubic Beziers, one per ≤ quarter-turn, using the
+        // exact endpoint tangents — is C¹-smooth and visually exact (radial
+        // error < 0.03% of r per segment). One short C command replaces
+        // ~24 line segments at the same fidelity.
+        const groups = new Map<string, Harmonic[]>()
+        for (const h of cloud) {
+          const k = `${h.noteId}:${h.bornAt}`
+          const arr = groups.get(k)
+          if (arr) arr.push(h)
+          else groups.set(k, [h])
         }
-      }
-
-      const stickMax = cssH - 38
-      ctx2d.textBaseline = 'alphabetic'
-      for (const h of cloud) {
-        const x = xOf(h.freq)
-        const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
-        const len = stickMax * 0.85 * norm
-        const opacity = Math.max(0.15, norm)
-        const color = PAD_COLORS[h.noteId] ?? accent
-        const isFund = h.partial === 1
-
-        ctx2d.strokeStyle = withAlpha(color, opacity * (isFund ? 0.85 : 0.5))
-        ctx2d.lineWidth = isFund ? 3 : 1.5
-        ctx2d.beginPath()
-        ctx2d.moveTo(x, baselineY - 1)
-        ctx2d.lineTo(x, baselineY - 1 - len)
-        ctx2d.stroke()
-
-        const topY = baselineY - 1 - len
-        ctx2d.fillStyle = withAlpha(color, opacity)
-        ctx2d.beginPath()
-        ctx2d.arc(x, topY, isFund ? 4.5 : 2.2, 0, 2 * Math.PI)
-        ctx2d.fill()
-
-        if (isFund) {
-          ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
-          ctx2d.textAlign = 'center'
-          ctx2d.fillStyle = withAlpha(color, opacity)
-          ctx2d.fillText(h.noteId, x, topY - 7)
-        } else if (norm > 0.3) {
-          ctx2d.font = '9px ui-monospace, Menlo, Consolas, monospace'
-          ctx2d.textAlign = 'left'
-          ctx2d.fillStyle = withAlpha(color, opacity * 0.8)
-          ctx2d.fillText(String(h.partial), x + 4, topY + 3)
+        const spiralRadius = (p: number) =>
+          R_BASE + (R_OUTER - R_BASE) * Math.min(1, p / P_MAX)
+        const spiralPoint = (p: number): [number, number] => {
+          const ang = p * 2 * Math.PI - Math.PI / 2
+          const r = spiralRadius(p)
+          return [CX + r * Math.cos(ang), CY + r * Math.sin(ang)]
         }
-      }
-
-      for (const b of bursts) {
-        const u = (now - b.bornMs) / BURST_MS
-        const x = xOf(b.freq)
-        const y = baselineY - stickMax * 0.55
-        const r = 6 + 28 * u * Math.min(1, b.magnitude * 4)
-        const alpha = (1 - u) * 0.85
-        ctx2d.fillStyle = withAlpha(accent, alpha * 0.35)
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, r, 0, 2 * Math.PI)
-        ctx2d.fill()
-        ctx2d.strokeStyle = withAlpha(accent, alpha)
-        ctx2d.lineWidth = 1.5
-        ctx2d.beginPath()
-        ctx2d.arc(x, y, r, 0, 2 * Math.PI)
-        ctx2d.stroke()
-        if (b.label) {
-          // Label floats up over the burst's life so successive hits read
-          // as a stack of named rewards rather than overlapping rings.
-          const rise = 22 + 18 * u
-          ctx2d.font = '11px ui-monospace, Menlo, Consolas, monospace'
-          ctx2d.textAlign = 'center'
-          ctx2d.textBaseline = 'middle'
-          ctx2d.fillStyle = withAlpha(accent, alpha)
-          ctx2d.fillText(b.label, x, y - rise)
+        // dP/dp evaluated analytically — gives the exact tangent vector at
+        // any point on the spiral for the cubic-Bezier control points.
+        const spiralTangent = (p: number): [number, number] => {
+          const ang = p * 2 * Math.PI - Math.PI / 2
+          const r = spiralRadius(p)
+          const drDp = p < P_MAX ? (R_OUTER - R_BASE) / P_MAX : 0
+          const dθDp = 2 * Math.PI
+          return [
+            drDp * Math.cos(ang) - r * Math.sin(ang) * dθDp,
+            drDp * Math.sin(ang) + r * Math.cos(ang) * dθDp,
+          ]
         }
+        for (const g of groups.values()) {
+          if (g.length < 2) continue
+          g.sort((a, b) => a.partial - b.partial)
+          const first = g[0]
+          const last = g[g.length - 1]
+          const norm = Math.max(0, Math.min(1, first.amp / Math.max(first.bornAmp, 1e-6)))
+          if (norm <= 0.05) continue
+          const pStart = pitchOf(first.freq)
+          const pEnd = pitchOf(last.freq)
+          // 4 segments per octave → each segment subtends at most a
+          // quarter-turn, where the cubic-Bezier-arc approximation is
+          // accurate to ~3·10⁻⁴ of the radius.
+          const segCount = Math.max(1, Math.ceil((pEnd - pStart) * 4))
+          const dp = (pEnd - pStart) / segCount
+          let [px0, py0] = spiralPoint(pStart)
+          let [tx0, ty0] = spiralTangent(pStart)
+          let d = `M${px0.toFixed(2)} ${py0.toFixed(2)} `
+          for (let i = 0; i < segCount; i++) {
+            const p1 = pStart + (i + 1) * dp
+            const [px1, py1] = spiralPoint(p1)
+            const [tx1, ty1] = spiralTangent(p1)
+            const c1x = px0 + (dp / 3) * tx0
+            const c1y = py0 + (dp / 3) * ty0
+            const c2x = px1 - (dp / 3) * tx1
+            const c2y = py1 - (dp / 3) * ty1
+            d += `C${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${px1.toFixed(2)} ${py1.toFixed(2)} `
+            px0 = px1
+            py0 = py1
+            tx0 = tx1
+            ty0 = ty1
+          }
+          const path = document.createElementNS(SVG_NS, 'path')
+          path.setAttribute('d', d.trim())
+          path.setAttribute('fill', 'none')
+          path.setAttribute('stroke', PAD_COLORS[first.noteId] ?? '#aa3bff')
+          path.setAttribute('stroke-opacity', String(norm * 0.35))
+          path.setAttribute('stroke-width', '1')
+          path.setAttribute('stroke-linecap', 'round')
+          path.setAttribute('stroke-linejoin', 'round')
+          nodes.push(path)
+        }
+
+        for (const h of cloud) {
+          const [x, y] = polar(h.freq)
+          const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
+          const opacity = Math.max(0.25, norm)
+          const color = PAD_COLORS[h.noteId] ?? '#aa3bff'
+          const isFund = h.partial === 1
+          const dotR = isFund ? 12 : Math.max(4, 8 / h.partial)
+
+          const dot = document.createElementNS(SVG_NS, 'circle')
+          dot.setAttribute('cx', x.toFixed(2))
+          dot.setAttribute('cy', y.toFixed(2))
+          dot.setAttribute('r', dotR.toFixed(2))
+          dot.setAttribute('fill', color)
+          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.95)))
+          nodes.push(dot)
+
+          if (isFund) {
+            const ring = document.createElementNS(SVG_NS, 'circle')
+            ring.setAttribute('cx', x.toFixed(2))
+            ring.setAttribute('cy', y.toFixed(2))
+            ring.setAttribute('r', (dotR + 3.5).toFixed(2))
+            ring.setAttribute('fill', 'none')
+            ring.setAttribute('stroke', color)
+            ring.setAttribute('stroke-opacity', String(opacity * 0.9))
+            ring.setAttribute('stroke-width', '1.75')
+            nodes.push(ring)
+          }
+        }
+        cloudG.replaceChildren(...nodes)
       }
 
-      if (cloud.length === 0 && bursts.length === 0) {
-        ctx2d.fillStyle = textH
-        ctx2d.globalAlpha = 0.35
-        ctx2d.textAlign = 'center'
-        ctx2d.textBaseline = 'middle'
-        ctx2d.font = '12px ui-monospace, Menlo, Consolas, monospace'
-        ctx2d.fillText('tap a slot to play', cssW / 2, cssH / 2)
-        ctx2d.globalAlpha = 1
+      const burstG = burstGroupRef.current
+      if (burstG) {
+        const nodes: SVGElement[] = []
+        for (const b of bursts) {
+          const u = (now - b.bornMs) / BURST_MS
+          const [x, y] = polar(b.freq)
+          const alpha = (1 - u) * 0.9
+          const blended = blendColors(b.colorIn, b.colorCloud, 0.5)
+          const haloR = 6 + 22 * u * Math.min(1, b.magnitude * 4)
+
+          const fill = document.createElementNS(SVG_NS, 'circle')
+          fill.setAttribute('cx', x.toFixed(2))
+          fill.setAttribute('cy', y.toFixed(2))
+          fill.setAttribute('r', haloR.toFixed(2))
+          fill.setAttribute('fill', blended)
+          fill.setAttribute('fill-opacity', String(alpha * 0.3))
+          nodes.push(fill)
+
+          const stroke = document.createElementNS(SVG_NS, 'circle')
+          stroke.setAttribute('cx', x.toFixed(2))
+          stroke.setAttribute('cy', y.toFixed(2))
+          stroke.setAttribute('r', haloR.toFixed(2))
+          stroke.setAttribute('fill', 'none')
+          stroke.setAttribute('stroke', blended)
+          stroke.setAttribute('stroke-opacity', String(alpha))
+          stroke.setAttribute('stroke-width', '1.5')
+          nodes.push(stroke)
+
+          if (b.label) {
+            // Currency reward floats radially outward over the burst's life
+            // so stacked hits read as a column of named gains rather than a
+            // single overlapping ring.
+            const ang = chromaAngleOf(b.freq)
+            const rise = 14 + 16 * u
+            const lx = x + rise * Math.cos(ang)
+            const ly = y + rise * Math.sin(ang)
+            const text = document.createElementNS(SVG_NS, 'text')
+            text.setAttribute('x', lx.toFixed(2))
+            text.setAttribute('y', ly.toFixed(2))
+            text.setAttribute('text-anchor', 'middle')
+            text.setAttribute('dominant-baseline', 'middle')
+            text.setAttribute('font-family', 'ui-monospace, Menlo, Consolas, monospace')
+            text.setAttribute('font-size', '10')
+            text.setAttribute('fill', blended)
+            text.setAttribute('fill-opacity', String(alpha))
+            text.textContent = b.label
+            nodes.push(text)
+          }
+        }
+        burstG.replaceChildren(...nodes)
+      }
+
+      // Hint glows: short expanding ring per soft hit (one partial landed
+      // on a coincidence slot, no payout yet). Renders above the static
+      // hint circles, below the cloud dots.
+      const glowG = glowGroupRef.current
+      if (glowG) {
+        const nodes: SVGElement[] = []
+        for (const g of glows) {
+          const u = (now - g.bornMs) / GLOW_LIFE_MS
+          const [x, y] = polar(g.freq)
+          const r = 6 + 14 * u
+          const alpha = (1 - u) * 0.85
+          const circle = document.createElementNS(SVG_NS, 'circle')
+          circle.setAttribute('cx', x.toFixed(2))
+          circle.setAttribute('cy', y.toFixed(2))
+          circle.setAttribute('r', r.toFixed(2))
+          circle.setAttribute('fill', 'none')
+          circle.setAttribute('stroke', g.color)
+          circle.setAttribute('stroke-opacity', String(alpha))
+          circle.setAttribute('stroke-width', '1.5')
+          nodes.push(circle)
+        }
+        glowG.replaceChildren(...nodes)
+      }
+
+      // Particles: each one eases along a quadratic Bezier from (x0, y0)
+      // on the helix, through a perpendicular-offset control (cx, cy), to
+      // (tx, ty) on the currency chip. Sine easing softens both ends of
+      // the trip, and staggered bornMs means later particles haven't even
+      // launched yet — they sit invisible until their time comes, then
+      // arc out like a delayed note in a phrase.
+      const particleG = particleGroupRef.current
+      if (particleG) {
+        const nodes: SVGElement[] = []
+        for (const part of particles) {
+          if (now < part.bornMs) continue
+          const u = Math.min(1, (now - part.bornMs) / part.life)
+          const eased = Math.sin((u * Math.PI) / 2)
+          const e1 = 1 - eased
+          const x = e1 * e1 * part.x0 + 2 * e1 * eased * part.cx + eased * eased * part.tx
+          const y = e1 * e1 * part.y0 + 2 * e1 * eased * part.cy + eased * eased * part.ty
+          const alpha = Math.max(0, (1 - u) * (1 - u))
+          const r = part.size * (1 - u * 0.4)
+          const circle = document.createElementNS(SVG_NS, 'circle')
+          circle.setAttribute('cx', x.toFixed(2))
+          circle.setAttribute('cy', y.toFixed(2))
+          circle.setAttribute('r', r.toFixed(2))
+          circle.setAttribute('fill', part.color)
+          circle.setAttribute('fill-opacity', String(alpha))
+          nodes.push(circle)
+        }
+        particleG.replaceChildren(...nodes)
+      }
+
+      const isEmpty =
+        cloud.length === 0 && bursts.length === 0 && glows.length === 0 && particles.length === 0
+      if (isEmpty !== wasEmpty) {
+        wasEmpty = isEmpty
+        const hint = emptyHintRef.current
+        if (hint) hint.style.opacity = isEmpty ? '0.35' : '0'
       }
 
       raf = requestAnimationFrame(draw)
@@ -351,9 +619,12 @@ export function HarvestStage({
         tolFrac: COINCIDENCE_TOL,
         gain: 1,
       })
+      const incomingColor = PAD_COLORS[body.id] ?? ''
 
       // Note currency: per-note yield × auto penalty.
       purse[noteId] = (purse[noteId] ?? 0) + autoMul * yieldMul(noteId)
+
+      const hintSet = hintFreqSetRef.current
 
       for (const h of hits) {
         const freqKey = freqToCurrency(h.freq, TONIC_HZ)
@@ -368,12 +639,97 @@ export function HarvestStage({
             ? `+f${ratio} · ${interval}`
             : `+f${ratio}`
           : ''
+        const cloudColor = PAD_COLORS[h.cloudNoteId] ?? incomingColor
         burstsRef.current.push({
           id: nextBurstIdRef.current++,
           freq: h.freq,
           bornMs: now,
           magnitude: h.bonus,
           label,
+          colorIn: incomingColor,
+          colorCloud: cloudColor,
+        })
+        // Particle shower from the hit point to wherever this coincidence's
+        // currency actually lives in the DOM (the chip with matching
+        // data-cur-key). Each particle arcs along a quadratic Bezier and
+        // launches a few dozen ms after the previous one, with both the
+        // arc magnitude and the inter-launch gap drawn from continuous
+        // distributions so the cohort feels organic instead of two clean
+        // streams + a metronome. When the chip can't be found (locked
+        // currency, off-screen, no key) we fall back to a fan reaching
+        // above the helix — same shape, just untargeted.
+        const [hx, hy] = polar(h.freq)
+        const blended = blendColors(incomingColor, cloudColor, 0.5)
+        const target = freqKey ? chipTargetVB(freqKey, svgRef.current) : null
+        const count = 10
+        let delay = 0
+        for (let i = 0; i < count; i++) {
+          const spawnA = Math.random() * Math.PI * 2
+          const spawnR = Math.random() * 4
+          const x0 = hx + Math.cos(spawnA) * spawnR
+          const y0 = hy + Math.sin(spawnA) * spawnR
+          let tx: number
+          let ty: number
+          if (target) {
+            tx = target[0] + (Math.random() - 0.5) * 18
+            ty = target[1] + (Math.random() - 0.5) * 10
+          } else {
+            const fanA = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.9
+            const dist = 110 + Math.random() * 60
+            tx = hx + Math.cos(fanA) * dist
+            ty = hy + Math.sin(fanA) * dist
+          }
+          // Quadratic-Bezier control: midpoint offset perpendicular to the
+          // source→target line. Sign and magnitude are both fully random
+          // (uniform across [-maxMag, +maxMag]) so some particles curve
+          // hard left, some hard right, and some pass nearly straight
+          // through the middle — breaks the two-stream look.
+          const dx = tx - x0
+          const dy = ty - y0
+          const dist = Math.hypot(dx, dy) || 1
+          const perpX = -dy / dist
+          const perpY = dx / dist
+          const maxMag = Math.min(70, dist * 0.4)
+          const curve = (Math.random() - 0.5) * 2 * maxMag
+          const cx = x0 + dx * 0.5 + perpX * curve
+          const cy = y0 + dy * 0.5 + perpY * curve
+          particlesRef.current.push({
+            id: nextBurstIdRef.current++,
+            x0,
+            y0,
+            cx,
+            cy,
+            tx,
+            ty,
+            bornMs: now + delay,
+            life: 1000 + Math.random() * 900,
+            color: blended,
+            size: 1.8 + Math.random() * 1.6,
+          })
+          // Variable inter-launch gap so the cohort spreads unevenly.
+          // Mean ~28 ms, range 14–42 ms — same total span as before but
+          // with no detectable beat.
+          delay += 14 + Math.random() * 28
+        }
+      }
+
+      // Soft glow when any new partial lands on a coincidence hint slot —
+      // even without a payout yet, the player should see that the spot
+      // they're aiming at lit up. The same path will fire bigger
+      // (burst + particles) on the second partial that completes the
+      // coincidence.
+      const coincidenceFreqs = new Set<string>()
+      for (const h of hits) coincidenceFreqs.add(h.freq.toFixed(3))
+      for (const ih of incoming) {
+        const key = ih.freq.toFixed(3)
+        // Skip if this partial already triggered the bigger burst path.
+        if (coincidenceFreqs.has(key)) continue
+        if (!hintSet.has(key)) continue
+        hintGlowsRef.current.push({
+          id: nextBurstIdRef.current++,
+          freq: ih.freq,
+          bornMs: now,
+          color: incomingColor,
         })
       }
 
@@ -558,7 +914,147 @@ export function HarvestStage({
 
   return (
     <section className="harvest" aria-label="Resonator stage">
-      <canvas ref={canvasRef} className="spectrum" aria-hidden="true" />
+      <svg
+        ref={svgRef}
+        className="spectrum"
+        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+        // overflow:visible lets coincidence particles fly *out* of the
+        // viewBox up to the currency chips above the helix.
+        style={{ overflow: 'visible' }}
+      >
+        {/* Octave guide rings — one per integer p, where the chroma wraps. */}
+        {Array.from({ length: Math.floor(P_MAX) }, (_, i) => {
+          const oct = i + 1
+          const r = R_BASE + (R_OUTER - R_BASE) * (oct / P_MAX)
+          return (
+            <circle
+              key={`oct-${oct}`}
+              cx={CX}
+              cy={CY}
+              r={r}
+              fill="none"
+              strokeWidth="1"
+              strokeDasharray="2 5"
+              style={{ stroke: 'var(--border)', strokeOpacity: 0.45 }}
+            />
+          )
+        })}
+
+        {/* Solid base ring — home of every note's fundamental. */}
+        <circle
+          cx={CX}
+          cy={CY}
+          r={R_BASE}
+          fill="none"
+          strokeWidth="1"
+          style={{ stroke: 'var(--border)', strokeOpacity: 0.7 }}
+        />
+
+        {/* Chroma compass: all 7 diatonic notes anchored at their just-
+            intonation chroma angles on the base ring. Slotted notes glow,
+            unslotted ones stay faint anchors. */}
+        {BODIES.map((body) => {
+          const ang = chromaAngleOf(TONIC_HZ * body.ratio)
+          const x = CX + R_BASE * Math.cos(ang)
+          const y = CY + R_BASE * Math.sin(ang)
+          const lx = CX + (R_BASE + 17) * Math.cos(ang)
+          const ly = CY + (R_BASE + 17) * Math.sin(ang)
+          const isOn = slotted.has(body.id)
+          const color = PAD_COLORS[body.id] ?? '#aa3bff'
+          return (
+            <g key={body.id}>
+              <circle
+                cx={x}
+                cy={y}
+                r={isOn ? 5.5 : 3.5}
+                fill={color}
+                fillOpacity={isOn ? 0.5 : 0.22}
+              />
+              <text
+                x={lx}
+                y={ly}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontFamily="ui-monospace, Menlo, Consolas, monospace"
+                fontSize="13"
+                fontWeight={isOn ? 600 : 400}
+                fill={color}
+                fillOpacity={isOn ? 1 : 0.55}
+              >
+                {body.id}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* Coincidence landing hints — every frequency where two or more
+            unlocked notes' harmonic series intersect (e.g. C·H3 ≡ G·H2 at
+            392 Hz). Stroke is the average of every contributing note's
+            color, so the eye reads "this spot is shared by these notes".
+            These are the harvestable targets; solo-partial positions are
+            intentionally omitted so the helix doesn't get noisy. */}
+        {harmonicHints.map((hint) => {
+          const [hx, hy] = polar(hint.freq)
+          const color = averageColors(hint.colors)
+          return (
+            <g key={hint.key}>
+              <circle
+                cx={hx}
+                cy={hy}
+                r={6.5}
+                fill={color}
+                fillOpacity={0.08}
+                stroke={color}
+                strokeOpacity={0.7}
+                strokeWidth={1.5}
+              />
+              <circle
+                cx={hx}
+                cy={hy}
+                r={2}
+                fill={color}
+                fillOpacity={0.55}
+              />
+            </g>
+          )
+        })}
+
+        {/* Tonic anchor at the centre. */}
+        <circle
+          cx={CX}
+          cy={CY}
+          r={2}
+          style={{ fill: 'var(--border)', fillOpacity: 0.6 }}
+        />
+
+        {/* Hint glows — soft pulses when a single partial lands on a
+            coincidence slot (no payout yet). */}
+        <g ref={glowGroupRef} />
+
+        {/* Dynamic layers — populated imperatively by the rAF loop. */}
+        <g ref={cloudGroupRef} />
+        <g ref={burstGroupRef} />
+
+        {/* Particles — kinetic reward shower when a coincidence fires. */}
+        <g ref={particleGroupRef} />
+
+        {/* Empty-state hint — faded in/out from rAF when both layers empty.
+            Sits inside the base ring so it doesn't fight the chroma compass. */}
+        <text
+          ref={emptyHintRef}
+          x={CX}
+          y={CY + R_BASE * 0.55}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontFamily="ui-monospace, Menlo, Consolas, monospace"
+          fontSize="13"
+          style={{ fill: 'var(--text-h)', opacity: 0.35, transition: 'opacity 120ms ease' }}
+        >
+          tap a slot to play
+        </text>
+      </svg>
       <ul className="pads" role="list">
         {Array.from({ length: slotCount }, (_, idx) => {
           const notes = slots[idx] ?? []
@@ -781,18 +1277,40 @@ function playPluck(
   )
 }
 
-function withAlpha(color: string, a: number): string {
+function parseHex(color: string): [number, number, number] | null {
   if (color.startsWith('#') && color.length === 7) {
-    const r = parseInt(color.slice(1, 3), 16)
-    const g = parseInt(color.slice(3, 5), 16)
-    const b = parseInt(color.slice(5, 7), 16)
-    return `rgba(${r},${g},${b},${a})`
+    return [
+      parseInt(color.slice(1, 3), 16),
+      parseInt(color.slice(3, 5), 16),
+      parseInt(color.slice(5, 7), 16),
+    ]
   }
-  if (color.startsWith('rgba(')) {
-    return color.replace(/,[^,]*\)$/, `,${a})`)
-  }
-  if (color.startsWith('rgb(')) {
-    return color.replace('rgb(', 'rgba(').replace(')', `,${a})`)
-  }
-  return color
+  return null
 }
+
+function blendColors(c1: string, c2: string, t = 0.5): string {
+  const a = parseHex(c1)
+  const b = parseHex(c2)
+  if (!a || !b) return c1 || c2
+  const r = Math.round(a[0] * (1 - t) + b[0] * t)
+  const g = Math.round(a[1] * (1 - t) + b[1] * t)
+  const bl = Math.round(a[2] * (1 - t) + b[2] * t)
+  return `rgb(${r},${g},${bl})`
+}
+
+function averageColors(colors: readonly string[]): string {
+  if (colors.length === 0) return '#aa3bff'
+  if (colors.length === 1) return colors[0]
+  let r = 0, g = 0, b = 0, n = 0
+  for (const c of colors) {
+    const parsed = parseHex(c)
+    if (!parsed) continue
+    r += parsed[0]
+    g += parsed[1]
+    b += parsed[2]
+    n++
+  }
+  if (n === 0) return colors[0]
+  return `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
+}
+

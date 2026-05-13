@@ -546,7 +546,9 @@ main h1 {
 
 .spectrum {
   width: 100%;
-  height: clamp(160px, 32vh, 260px);
+  max-width: 480px;
+  aspect-ratio: 1;
+  margin: 0 auto;
   display: block;
   border: 1px solid var(--border);
   border-radius: 12px;
