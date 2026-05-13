@@ -846,6 +846,7 @@ function App() {
                 <li
                   key={k}
                   className="cur-chip"
+                  data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
                   title={`${k} currency — mint by tapping ${k}`}
                 >
@@ -867,6 +868,7 @@ function App() {
                 <li
                   key={k}
                   className="cur-chip cur-chip-harm"
+                  data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
                   title={`f${ratio} — coincidence frequency ${ratio}·tonic (${interval})`}
                 >

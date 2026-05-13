@@ -80,6 +80,25 @@ const polar = (freq: number): [number, number] => {
   return [CX + r * Math.cos(a), CY + r * Math.sin(a)]
 }
 
+// Locate the currency chip for `key` and return its centre in the helix
+// SVG's viewBox coords, or null if the chip isn't mounted (locked currency,
+// different tab, etc.). With aspect-ratio:1 on the SVG and a square
+// viewBox, the per-axis scale is uniform, so a single ratio converts both
+// axes — and points outside the viewBox (the chips sit above it) come back
+// with negative y, which is exactly what overflow:visible lets us render.
+function chipTargetVB(key: string, svgEl: SVGSVGElement | null): [number, number] | null {
+  if (!svgEl) return null
+  const chip = document.querySelector(`[data-cur-key="${key}"]`) as HTMLElement | null
+  if (!chip) return null
+  const chipRect = chip.getBoundingClientRect()
+  const svgRect = svgEl.getBoundingClientRect()
+  if (svgRect.width === 0 || svgRect.height === 0) return null
+  const scale = VIEW_W / svgRect.width
+  const x = (chipRect.left + chipRect.width / 2 - svgRect.left) * scale
+  const y = (chipRect.top + chipRect.height / 2 - svgRect.top) * scale
+  return [x, y]
+}
+
 type Burst = {
   id: number
   freq: number
@@ -106,14 +125,17 @@ type HintGlow = {
 }
 
 // Full "properly hit" feedback: a coincidence fired and minted currency.
-// We shower particles outward from the hint position so the reward reads
-// kinetically, on top of the blended halo + floating label from Burst.
+// Each particle eases from its spawn point to a target — usually the DOM
+// rect of the currency chip the payout went to (looked up via
+// `data-cur-key`), so the reward visually arrives where the counter ticks
+// up. Falls back to a point well above the helix when the chip can't be
+// located (locked currency, off-screen, etc.).
 type Particle = {
   id: number
-  x: number
-  y: number
-  vx: number
-  vy: number
+  x0: number
+  y0: number
+  tx: number
+  ty: number
   bornMs: number
   life: number
   color: string
@@ -141,6 +163,7 @@ export function HarvestStage({
   onSlotChange,
   onEarn,
 }: Props) {
+  const svgRef = useRef<SVGSVGElement>(null)
   const cloudGroupRef = useRef<SVGGElement>(null)
   const burstGroupRef = useRef<SVGGElement>(null)
   const glowGroupRef = useRef<SVGGElement>(null)
@@ -271,11 +294,6 @@ export function HarvestStage({
       for (let i = 0; i < particles.length; i++) {
         const part = particles[i]
         if (now - part.bornMs >= part.life) continue
-        part.x += part.vx * dt
-        part.y += part.vy * dt
-        // Slight drag so particles ease to a stop rather than fly off-disc.
-        part.vx *= 0.96
-        part.vy *= 0.96
         particles[pW++] = part
       }
       particles.length = pW
@@ -468,19 +486,23 @@ export function HarvestStage({
         glowG.replaceChildren(...nodes)
       }
 
-      // Particles: small filled dots radiating from coincidence hit points.
-      // Size shrinks slightly with age and alpha falls off quadratically so
-      // the shower has a sharp leading edge and gentle trail.
+      // Particles: each one eases from (x0, y0) on the helix to (tx, ty) on
+      // the currency chip the coincidence paid out to. Ease-out cubic gives
+      // a fast launch and a soft landing right as the alpha fades to zero,
+      // so visually the particle "delivers" the reward to the counter.
       const particleG = particleGroupRef.current
       if (particleG) {
         const nodes: SVGElement[] = []
         for (const part of particles) {
-          const u = (now - part.bornMs) / part.life
+          const u = Math.min(1, (now - part.bornMs) / part.life)
+          const eased = 1 - Math.pow(1 - u, 3)
+          const x = part.x0 + (part.tx - part.x0) * eased
+          const y = part.y0 + (part.ty - part.y0) * eased
           const alpha = Math.max(0, (1 - u) * (1 - u))
           const r = part.size * (1 - u * 0.4)
           const circle = document.createElementNS(SVG_NS, 'circle')
-          circle.setAttribute('cx', part.x.toFixed(2))
-          circle.setAttribute('cy', part.y.toFixed(2))
+          circle.setAttribute('cx', x.toFixed(2))
+          circle.setAttribute('cy', y.toFixed(2))
           circle.setAttribute('r', r.toFixed(2))
           circle.setAttribute('fill', part.color)
           circle.setAttribute('fill-opacity', String(alpha))
@@ -602,21 +624,40 @@ export function HarvestStage({
           colorIn: incomingColor,
           colorCloud: cloudColor,
         })
-        // Particle shower from the hit point — the "properly hit" reward.
-        // 12 particles fan out at evenly-spaced angles with a little jitter,
-        // colored in the blend of the two contributing notes.
+        // Particle shower from the hit point to wherever this coincidence's
+        // currency actually lives in the DOM (the chip with matching
+        // data-cur-key). Each particle gets a small spawn offset and a
+        // small target offset so they spread out instead of marching in
+        // single file. When the chip can't be found (locked currency,
+        // off-screen, no key) we fall back to a fan that rises above the
+        // helix — still satisfying, just untargeted.
         const [hx, hy] = polar(h.freq)
         const blended = blendColors(incomingColor, cloudColor, 0.5)
+        const target = freqKey ? chipTargetVB(freqKey, svgRef.current) : null
         const count = 12
         for (let i = 0; i < count; i++) {
-          const a = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4
-          const speed = 110 + Math.random() * 70 // viewBox units / second
+          const spawnA = Math.random() * Math.PI * 2
+          const spawnR = Math.random() * 4
+          const x0 = hx + Math.cos(spawnA) * spawnR
+          const y0 = hy + Math.sin(spawnA) * spawnR
+          let tx: number
+          let ty: number
+          if (target) {
+            tx = target[0] + (Math.random() - 0.5) * 18
+            ty = target[1] + (Math.random() - 0.5) * 10
+          } else {
+            // Fallback: an upper-cone fan reaching above the helix.
+            const fanA = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.9
+            const dist = 110 + Math.random() * 60
+            tx = hx + Math.cos(fanA) * dist
+            ty = hy + Math.sin(fanA) * dist
+          }
           particlesRef.current.push({
             id: nextBurstIdRef.current++,
-            x: hx,
-            y: hy,
-            vx: Math.cos(a) * speed,
-            vy: Math.sin(a) * speed,
+            x0,
+            y0,
+            tx,
+            ty,
             bornMs: now,
             life: 650 + Math.random() * 300,
             color: blended,
@@ -827,10 +868,14 @@ export function HarvestStage({
   return (
     <section className="harvest" aria-label="Resonator stage">
       <svg
+        ref={svgRef}
         className="spectrum"
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         preserveAspectRatio="xMidYMid meet"
         aria-hidden="true"
+        // overflow:visible lets coincidence particles fly *out* of the
+        // viewBox up to the currency chips above the helix.
+        style={{ overflow: 'visible' }}
       >
         {/* Octave guide rings — one per integer p, where the chroma wraps. */}
         {Array.from({ length: Math.floor(P_MAX) }, (_, i) => {
