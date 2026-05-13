@@ -335,6 +335,17 @@ export function HarvestStage({
       const body = BODIES.find((b) => b.id === noteId)
       if (!body) continue
 
+      // Same-note re-plucks damp the prior emission physically; mirror that
+      // by purging any cloud entries from this note before the scan + push.
+      // Without this guard, mashing — or a tab-unthrottle racing setTimeout
+      // cooldown against rAF cloud decay — can let a re-tap coincide with
+      // its own still-decaying tail and mint a self-resonance freq currency.
+      let w = 0
+      for (let i = 0; i < cloud.length; i++) {
+        if (cloud[i].noteId !== body.id) cloud[w++] = cloud[i]
+      }
+      cloud.length = w
+
       const incoming = harmonicSeries(TONIC_HZ * body.ratio, HARMONIC_COUNT, defaultAmp)
       const { hits } = scanCoincidences(cloud, incoming, {
         tolFrac: COINCIDENCE_TOL,
