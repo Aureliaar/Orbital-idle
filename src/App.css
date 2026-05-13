@@ -475,22 +475,37 @@ main h1 {
 .cur-chip {
   --chip-color: var(--text);
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
-  padding: 3px 9px;
+  padding: 4px 10px;
   border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--chip-color) 6%, transparent);
   font-size: 0.82rem;
   color: var(--text-h);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.cur-chip:hover {
+  border-color: color-mix(in srgb, var(--chip-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
 }
 
 .cur-chip-harm {
   border-style: dashed;
+  padding-right: 8px;
+}
+
+.cur-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chip-color);
+  flex: none;
 }
 
 .cur-key {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   letter-spacing: 0.04em;
   color: var(--chip-color);
   font-weight: 600;
@@ -501,21 +516,52 @@ main h1 {
   color: var(--text-h);
 }
 
+/* Interval-name tag inside a freq chip (e.g. "M3" on ƒ5). Tinted with the
+   chip's spectrum color so a row of chips reads as a gradient. */
+.cur-interval {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+}
+
+/* Tiny note-colored dots showing which notes the freq currency is minted
+   from. Lets the player see at a glance which combinations to slot. */
+.cur-sources {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: 2px;
+}
+
+.cur-source {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+
 /* Inline cost chips on unlock/upgrade cards. Smaller + denser than the
-   header chips so a long cost line still fits on one row. */
+   header chips so a long cost line still fits on one row. When a `purse`
+   is passed, each chip shows `have / need` and tints itself green-ish
+   ("ok") or dimmed ("short") so the player sees at a glance which
+   currencies are gating the buy. */
 .cost-chips {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 2px;
 }
 
 .cost-chip {
   --chip-color: var(--text);
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
-  padding: 1px 6px;
+  gap: 4px;
+  padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--chip-color) 40%, var(--border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--chip-color) 5%, transparent);
@@ -526,11 +572,45 @@ main h1 {
 
 .cost-chip-v {
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
 }
 
 .cost-chip-k {
   color: var(--chip-color);
   font-weight: 600;
+}
+
+.cost-chip-have {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.cost-chip-sep {
+  color: var(--text);
+  opacity: 0.45;
+}
+
+.cost-chip-need {
+  color: var(--text);
+}
+
+.cost-chip.short {
+  opacity: 0.85;
+}
+
+.cost-chip.short .cost-chip-have {
+  color: var(--text);
+}
+
+.cost-chip.ok {
+  border-color: color-mix(in srgb, var(--chip-color) 65%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+}
+
+.cost-chip.ok .cost-chip-have {
+  color: var(--chip-color);
 }
 
 /* --- Harvest stage --- */
@@ -979,27 +1059,60 @@ main h1 {
   color: var(--accent);
 }
 
-.unlock.unlock-stack {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-style: dashed;
-  grid-column: 1 / -1;
-}
-
-/* --- Progression: idle rate + unlock cards --- */
+/* --- Progression: idle rate + unlock cards + yield upgrades --- */
 
 .resonator-progress {
   width: min(720px, 96vw);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
   margin-top: 6px;
+}
+
+.prog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Section headers. The label is the verb-y handle ("Next", "Yield",
+   "Idle"); the sub is a short flavor sentence so the player can skim
+   the resonator without reading the longer hint at the bottom. */
+.prog-h {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+  font-weight: 400;
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.prog-h-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text-h);
+  letter-spacing: 0.14em;
+}
+
+.prog-h-sub {
+  font-family: var(--mono);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 0.72rem;
+  opacity: 0.75;
 }
 
 .idle-rate {
   margin: 0;
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
   align-items: center;
   gap: 6px;
   font-size: 0.78rem;
@@ -1007,21 +1120,12 @@ main h1 {
   font-family: var(--mono);
 }
 
-.idle-label {
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  color: var(--text);
-  opacity: 0.75;
-  margin-right: 2px;
-}
-
 .idle-pill {
   --chip-color: var(--text);
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--chip-color) 4%, transparent);
@@ -1037,112 +1141,100 @@ main h1 {
   color: var(--chip-color);
 }
 
-.unlocks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-/* Per-note yield upgrades — one card per unlocked note, priced in the
-   next note on the circle of fifths. Auto-fits to row width so the
-   panel grows naturally as the player unlocks more notes. */
+/* Card grids. Unlocks are a touch wider since they include longer cost
+   lines; yield cards are dense enough to fit ~3 per row on desktop. */
+.unlocks,
 .upgrades {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 8px;
 }
 
-.upgrade-note {
-  --chip-color: var(--text);
-  border-color: color-mix(in srgb, var(--chip-color) 35%, var(--border));
+.unlocks {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.upgrade-note .upgrade-name {
-  color: var(--chip-color);
+.upgrades {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+/* Card shell, shared by unlock + upgrade cards. Vertically stacked: head
+   → meta/cost → button, with an affordance progress bar at the very
+   bottom edge that fills as the purse closes in on the cost. */
+.unlock,
 .upgrade {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: transparent;
-}
-
-.upgrade-info {
+  --chip-color: var(--accent);
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.upgrade-name {
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  color: var(--text-h);
-}
-
-.upgrade-stat {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--text);
-}
-
-.upgrade-btn {
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-h);
-  font: inherit;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: border-color 100ms ease, background 100ms ease;
-}
-
-.upgrade-btn:not(:disabled):hover {
-  border-color: var(--accent);
-  background: var(--accent-bg);
-}
-
-.upgrade-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.unlock {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 30%, var(--border));
   border-radius: 10px;
-  background: transparent;
+  background: color-mix(in srgb, var(--chip-color) 3%, transparent);
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.unlock:hover,
+.upgrade:hover {
+  border-color: color-mix(in srgb, var(--chip-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 6%, transparent);
 }
 
 .unlock.next {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-
-.unlock.unlock-auto {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: var(--accent-bg);
+  border-color: color-mix(in srgb, var(--chip-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 7%, transparent);
 }
 
 .unlock.unlock-slot {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   border-style: dashed;
   grid-column: 1 / -1;
+}
+
+.unlock.unlock-stack {
+  border-style: dashed;
+  grid-column: 1 / -1;
+}
+
+.unlock-head,
+.upgrade-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unlock-kind {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+}
+
+.unlock-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.unlock-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
 }
 
 .unlock-desc {
@@ -1150,45 +1242,175 @@ main h1 {
   font-size: 0.7rem;
   color: var(--text);
   opacity: 0.85;
+  margin-top: -2px;
 }
 
-.unlock-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.unlock-note {
-  font-family: var(--mono);
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--text-h);
-}
-
-.unlock-cost {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--text);
-}
-
-.unlock-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
+.unlock-btn,
+.upgrade-btn {
+  align-self: stretch;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
   border-radius: 6px;
   background: transparent;
   color: var(--text-h);
   font: inherit;
-  font-size: 0.82rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
   cursor: pointer;
-  transition: border-color 100ms ease, background 100ms ease;
+  transition: border-color 100ms ease, background 100ms ease, color 100ms ease;
 }
 
-.unlock-btn:not(:disabled):hover {
-  border-color: var(--accent);
-  background: var(--accent-bg);
+.unlock-btn:not(:disabled):hover,
+.upgrade-btn:not(:disabled):hover {
+  border-color: var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+  color: var(--chip-color);
 }
 
-.unlock-btn:disabled {
+.unlock-btn:disabled,
+.upgrade-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.5;
+}
+
+/* Affordance bar: a thin gradient line glued to the bottom edge that
+   fills proportionally to `--p` (0..1 across the four required
+   currencies). Reads as a "you're 60% of the way there" cue without the
+   player having to do the math from cost chips. */
+.unlock-progress,
+.upgrade-progress {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--chip-color) 70%, transparent) calc(var(--p, 0) * 100%),
+    color-mix(in srgb, var(--chip-color) 10%, transparent) calc(var(--p, 0) * 100%)
+  );
+  pointer-events: none;
+  transition: background 280ms ease-out;
+}
+
+/* Yield-upgrade card: tinted by note color via --chip-color set inline.
+   Header shows the note + level chip; the multiplier row is the
+   marquee — current ×mul fades into the next-level preview. */
+.upgrade-name {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--chip-color);
+  flex: 1;
+}
+
+.upgrade-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.upgrade-lvl {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.upgrade-mul-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--mono);
+}
+
+.upgrade-mul {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--chip-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.upgrade-mul-next {
+  font-size: 0.92rem;
+  color: var(--text-h);
+  opacity: 0.7;
+}
+
+.upgrade-arrow {
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 0.9rem;
+}
+
+.upgrade-locked-msg {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.upgrade-locked-msg strong {
+  color: var(--chip-color);
+  font-weight: 600;
+}
+
+.upgrade.locked {
+  opacity: 0.78;
+}
+
+/* Affordable cards: stronger border + a soft pulsing halo so the eye lands
+   on them across a busy panel. The pulse is slow enough not to be a
+   distraction and stops the moment the buy is gone (card unmounts or
+   loses the class). */
+.unlock.affordable,
+.upgrade.affordable {
+  border-color: color-mix(in srgb, var(--chip-color) 75%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
+  animation: card-affordable 2.6s ease-in-out infinite;
+}
+
+@keyframes card-affordable {
+  0%, 100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--chip-color) 18%, transparent);
+  }
+}
+
+.unlock.affordable .unlock-btn,
+.upgrade.affordable .upgrade-btn {
+  border-color: var(--chip-color);
+  color: var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 8%, transparent);
+}
+
+/* Level-up bump: the current ×mul span keys on `lvl`, so React remounts
+   it every time the player buys a level. The remount restarts this
+   animation, giving a satisfying snap of "your multiplier just grew". */
+.upgrade-mul {
+  display: inline-block;
+  transform-origin: left baseline;
+  animation: mul-bump 480ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes mul-bump {
+  0% {
+    transform: scale(1.22);
+    color: var(--accent);
+  }
+  100% {
+    transform: scale(1);
+    color: var(--chip-color);
+  }
+}
+
+.upgrade-mul-next {
+  animation: none;
 }

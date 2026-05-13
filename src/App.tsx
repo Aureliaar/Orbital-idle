@@ -14,6 +14,7 @@ import {
   FREQ_CURRENCIES,
   FREQ_CURRENCY_KEYS,
   FREQ_INTERVAL_LABEL,
+  FREQ_SOURCES,
   INITIAL_SLOT_COUNT,
   MAX_SLOT0_CAPACITY,
   MAX_SLOT_COUNT,
@@ -25,7 +26,6 @@ import type {
   CurrencyKey,
   CurrencyPurse,
   FreqCurrency,
-  NoteCurrency,
 } from './harvest-config'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
@@ -237,7 +237,13 @@ const formatCost = (cost: CurrencyPurse): string => {
   return parts.join(' · ')
 }
 
-function CostChips({ cost }: { cost: CurrencyPurse }) {
+function CostChips({
+  cost,
+  purse,
+}: {
+  cost: CurrencyPurse
+  purse?: CurrencyPurse
+}) {
   const entries: Array<{ k: CurrencyKey; label: string; v: number; color: string }> = []
   for (const k of NOTE_CURRENCIES) {
     const v = cost[k]
@@ -249,14 +255,54 @@ function CostChips({ cost }: { cost: CurrencyPurse }) {
   }
   return (
     <span className="cost-chips" aria-label={formatCost(cost)}>
-      {entries.map(({ k, label, v, color }) => (
-        <span key={k} className="cost-chip" style={{ ['--chip-color' as string]: color }}>
-          <span className="cost-chip-v">{v}</span>
-          <span className="cost-chip-k">{label}</span>
-        </span>
-      ))}
+      {entries.map(({ k, label, v, color }) => {
+        const have = purse ? Math.floor(purse[k] ?? 0) : null
+        const need = v
+        const short = have !== null && have < need
+        return (
+          <span
+            key={k}
+            className={`cost-chip${short ? ' short' : have !== null ? ' ok' : ''}`}
+            style={{ ['--chip-color' as string]: color }}
+            title={
+              have !== null
+                ? `${have} / ${need} ${label}`
+                : `${need} ${label}`
+            }
+          >
+            <span className="cost-chip-k">{label}</span>
+            <span className="cost-chip-v">
+              {have !== null ? (
+                <>
+                  <span className="cost-chip-have">{have}</span>
+                  <span className="cost-chip-sep">/</span>
+                  <span className="cost-chip-need">{need}</span>
+                </>
+              ) : (
+                need
+              )}
+            </span>
+          </span>
+        )
+      })}
     </span>
   )
+}
+
+// Affordance progress: how close the player is to covering `cost` given
+// their `purse`. min ratio across all required currencies, clamped to [0,1].
+function costProgress(purse: CurrencyPurse, cost: CurrencyPurse): number {
+  let min = 1
+  let any = false
+  for (const k of Object.keys(cost) as CurrencyKey[]) {
+    const need = cost[k] ?? 0
+    if (need <= 0) continue
+    any = true
+    const have = purse[k] ?? 0
+    const ratio = Math.min(1, have / need)
+    if (ratio < min) min = ratio
+  }
+  return any ? min : 1
 }
 
 function App() {
@@ -847,11 +893,12 @@ function App() {
               return (
                 <li
                   key={k}
-                  className="cur-chip"
+                  className="cur-chip cur-chip-note"
                   data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
-                  title={`${k} currency — mint by tapping ${k}`}
+                  title={`${k} — minted by tapping ${k}`}
                 >
+                  <span className="cur-swatch" aria-hidden="true" />
                   <span className="cur-key">{k}</span>
                   <span className="cur-value">{formatCurrency(v)}</span>
                 </li>
@@ -866,16 +913,30 @@ function App() {
               const color = FREQ_COLORS[k]
               const ratio = FREQ_LABEL_BY_KEY[k]
               const interval = FREQ_INTERVAL_LABEL[k] ?? ''
+              const sources = FREQ_SOURCES[k] ?? []
+              const sourceText = sources.join('×') || '—'
               return (
                 <li
                   key={k}
                   className="cur-chip cur-chip-harm"
                   data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
-                  title={`f${ratio} — coincidence frequency ${ratio}·tonic (${interval})`}
+                  title={`ƒ${ratio} · ${interval} — minted when ${sourceText} partials coincide at ${ratio}·tonic`}
                 >
-                  <span className="cur-key">f{ratio}</span>
+                  <span className="cur-key">ƒ{ratio}</span>
+                  {interval && <span className="cur-interval">{interval}</span>}
                   <span className="cur-value">{formatCurrency(v)}</span>
+                  {sources.length > 0 && (
+                    <span className="cur-sources" aria-hidden="true">
+                      {sources.map((id) => (
+                        <span
+                          key={id}
+                          className="cur-source"
+                          style={{ background: PAD_COLORS[id] ?? 'var(--text)' }}
+                        />
+                      ))}
+                    </span>
+                  )}
                 </li>
               )
             })}
@@ -954,146 +1015,236 @@ function App() {
           />
           <section className="resonator-progress" aria-label="Progression">
             {anyAutoPluck && visibleIdleEntries.length > 0 && (
-              <p className="idle-rate" aria-label="Idle rate">
-                <span className="idle-label">Idle</span>
-                {visibleIdleEntries.map(({ k, label, rate, color }) => (
-                  <span
-                    key={k}
-                    className="idle-pill"
-                    style={{ ['--chip-color' as string]: color }}
-                  >
-                    <strong>{rate.toFixed(2)}</strong>
-                    <span>{label}/s</span>
-                  </span>
-                ))}
-              </p>
+              <div className="prog-section prog-idle" aria-label="Idle rate">
+                <h3 className="prog-h">
+                  <span className="prog-h-label">Idle</span>
+                  <span className="prog-h-sub">earning while you watch</span>
+                </h3>
+                <p className="idle-rate">
+                  {visibleIdleEntries.map(({ k, label, rate, color }) => (
+                    <span
+                      key={k}
+                      className="idle-pill"
+                      style={{ ['--chip-color' as string]: color }}
+                    >
+                      <strong>{rate.toFixed(2)}</strong>
+                      <span>{label}/s</span>
+                    </span>
+                  ))}
+                </p>
+              </div>
             )}
             {(nextUnlocks.length > 0 ||
               nextSlotCost ||
               slot0CapCost ||
               autoPluckSlotsToOffer.length > 0) && (
-              <ul className="unlocks" role="list">
-                {nextUnlocks.map((id, i) => {
-                  const cost = UNLOCK_COSTS[id]
-                  const affordable = canAffordPurse(currencies, cost)
-                  return (
-                    <li key={id} className={`unlock${i === 0 ? ' next' : ''}`}>
-                      <div className="unlock-info">
-                        <span className="unlock-note">{id}</span>
-                        <CostChips cost={cost} />
-                      </div>
-                      <button
-                        type="button"
-                        className="unlock-btn"
-                        disabled={!affordable}
-                        onClick={() => handleUnlock(id)}
+              <div className="prog-section prog-unlocks">
+                <h3 className="prog-h">
+                  <span className="prog-h-label">Next</span>
+                  <span className="prog-h-sub">unlock new pieces of the resonator</span>
+                </h3>
+                <ul className="unlocks" role="list">
+                  {nextUnlocks.map((id, i) => {
+                    const cost = UNLOCK_COSTS[id]
+                    const affordable = canAffordPurse(currencies, cost)
+                    const progress = costProgress(currencies, cost)
+                    const color = PAD_COLORS[id] ?? 'var(--accent)'
+                    return (
+                      <li
+                        key={id}
+                        className={`unlock unlock-note${i === 0 ? ' next' : ''}${affordable ? ' affordable' : ''}`}
+                        style={{ ['--chip-color' as string]: color }}
                       >
-                        Unlock
-                      </button>
-                    </li>
-                  )
-                })}
-                {nextSlotCost && (
-                  <li className="unlock unlock-slot next">
-                    <div className="unlock-info">
-                      <span className="unlock-note">Slot {nextSlotIdx}</span>
-                      <CostChips cost={nextSlotCost} />
+                        <header className="unlock-head">
+                          <span className="unlock-kind">Note</span>
+                          <span className="unlock-title">
+                            <span
+                              className="unlock-swatch"
+                              aria-hidden="true"
+                              style={{ background: color }}
+                            />
+                            {id}
+                          </span>
+                        </header>
+                        <CostChips cost={cost} purse={currencies} />
+                        <span
+                          className="unlock-progress"
+                          style={{ ['--p' as string]: progress.toFixed(3) }}
+                          aria-hidden="true"
+                        />
+                        <button
+                          type="button"
+                          className="unlock-btn"
+                          disabled={!affordable}
+                          onClick={() => handleUnlock(id)}
+                        >
+                          Unlock
+                        </button>
+                      </li>
+                    )
+                  })}
+                  {nextSlotCost && (
+                    <li
+                      className={`unlock unlock-slot next${canAffordSlot ? ' affordable' : ''}`}
+                      style={{ ['--chip-color' as string]: 'var(--accent)' }}
+                    >
+                      <header className="unlock-head">
+                        <span className="unlock-kind">Slot</span>
+                        <span className="unlock-title">Slot {nextSlotIdx}</span>
+                      </header>
                       <span className="unlock-desc">
                         {nextSlotIdx === 2
                           ? 'a home for your second note'
                           : '3-note resonance unlocks'}
                       </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="unlock-btn"
-                      disabled={!canAffordSlot}
-                      onClick={handleUnlockSlot}
-                    >
-                      Unlock
-                    </button>
-                  </li>
-                )}
-                {slot0CapCost && (
-                  <li className="unlock unlock-stack">
-                    <div className="unlock-info">
-                      <span className="unlock-note">
-                        Slot 1 stack · {slot0Capacity} → {nextSlot0Cap} notes
-                      </span>
-                      <CostChips cost={slot0CapCost} />
-                      <span className="unlock-desc">
-                        play a chord on every tap
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="unlock-btn"
-                      disabled={!canAffordSlot0Cap}
-                      onClick={handleUpgradeSlot0Capacity}
-                    >
-                      Upgrade
-                    </button>
-                  </li>
-                )}
-                {autoPluckSlotsToOffer.map((slotIdx) => {
-                  const cost = autoPluckCost(slotIdx)
-                  const affordable = canAffordPurse(currencies, cost)
-                  return (
-                    <li key={`auto-${slotIdx}`} className="unlock unlock-auto">
-                      <div className="unlock-info">
-                        <span className="unlock-note">⚡ Auto-pluck slot {slotIdx + 1}</span>
-                        <CostChips cost={cost} />
-                        <span className="unlock-desc">half yield, fires itself</span>
-                      </div>
+                      <CostChips cost={nextSlotCost} purse={currencies} />
+                      <span
+                        className="unlock-progress"
+                        style={{
+                          ['--p' as string]: costProgress(currencies, nextSlotCost).toFixed(3),
+                        }}
+                        aria-hidden="true"
+                      />
                       <button
                         type="button"
                         className="unlock-btn"
-                        disabled={!affordable}
-                        onClick={() => handleUnlockAutoPluck(slotIdx)}
+                        disabled={!canAffordSlot}
+                        onClick={handleUnlockSlot}
                       >
                         Unlock
                       </button>
                     </li>
-                  )
-                })}
-              </ul>
-            )}
-            {unlockedIds.length > 0 && (
-              <ul className="upgrades" role="list" aria-label="Per-note yield upgrades">
-                {unlockedIds.map((id) => {
-                  const lvl = noteYieldLvls[id] ?? 0
-                  const mul = noteYieldMultiplier(lvl)
-                  const cost = noteYieldCost(id, lvl)
-                  const costNote = FIFTH_NEXT[id]
-                  const gateUnlocked = unlockedIds.includes(costNote)
-                  const affordable = gateUnlocked && canAffordPurse(currencies, cost)
-                  const nextMul = mul * YIELD_STEP
-                  return (
+                  )}
+                  {slot0CapCost && (
                     <li
-                      key={id}
-                      className="upgrade upgrade-note"
-                      style={{ ['--chip-color' as string]: PAD_COLORS[id] ?? 'var(--text)' }}
+                      className={`unlock unlock-stack${canAffordSlot0Cap ? ' affordable' : ''}`}
+                      style={{ ['--chip-color' as string]: 'var(--accent)' }}
                     >
-                      <div className="upgrade-info">
-                        <span className="upgrade-name">{id} yield</span>
-                        <span className="upgrade-stat">
-                          ×{mul.toFixed(2)} · lvl {lvl}
-                          {!gateUnlocked && ` · needs ${costNote}`}
+                      <header className="unlock-head">
+                        <span className="unlock-kind">Stack</span>
+                        <span className="unlock-title">
+                          Slot 1 · {slot0Capacity} → {nextSlot0Cap}
                         </span>
-                      </div>
+                      </header>
+                      <span className="unlock-desc">play a chord on every tap</span>
+                      <CostChips cost={slot0CapCost} purse={currencies} />
+                      <span
+                        className="unlock-progress"
+                        style={{
+                          ['--p' as string]: costProgress(currencies, slot0CapCost).toFixed(3),
+                        }}
+                        aria-hidden="true"
+                      />
                       <button
                         type="button"
-                        className="upgrade-btn"
-                        disabled={!affordable}
-                        onClick={() => buyNoteYield(id)}
-                        title={gateUnlocked ? formatCost(cost) : `Unlock ${costNote} first`}
+                        className="unlock-btn"
+                        disabled={!canAffordSlot0Cap}
+                        onClick={handleUpgradeSlot0Capacity}
                       >
-                        ×{nextMul.toFixed(2)} · {cost[costNote as NoteCurrency] ?? 0} {costNote}
+                        Upgrade
                       </button>
                     </li>
-                  )
-                })}
-              </ul>
+                  )}
+                  {autoPluckSlotsToOffer.map((slotIdx) => {
+                    const cost = autoPluckCost(slotIdx)
+                    const affordable = canAffordPurse(currencies, cost)
+                    const progress = costProgress(currencies, cost)
+                    return (
+                      <li
+                        key={`auto-${slotIdx}`}
+                        className={`unlock unlock-auto${affordable ? ' affordable' : ''}`}
+                        style={{ ['--chip-color' as string]: 'var(--accent)' }}
+                      >
+                        <header className="unlock-head">
+                          <span className="unlock-kind">Auto ⚡</span>
+                          <span className="unlock-title">Slot {slotIdx + 1}</span>
+                        </header>
+                        <span className="unlock-desc">half yield, fires itself</span>
+                        <CostChips cost={cost} purse={currencies} />
+                        <span
+                          className="unlock-progress"
+                          style={{ ['--p' as string]: progress.toFixed(3) }}
+                          aria-hidden="true"
+                        />
+                        <button
+                          type="button"
+                          className="unlock-btn"
+                          disabled={!affordable}
+                          onClick={() => handleUnlockAutoPluck(slotIdx)}
+                        >
+                          Unlock
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+            {unlockedIds.length > 0 && (
+              <div className="prog-section prog-upgrades">
+                <h3 className="prog-h">
+                  <span className="prog-h-label">Yield</span>
+                  <span className="prog-h-sub">
+                    each note's currency scales ×{YIELD_STEP.toFixed(2)} per level, paid in its dominant
+                  </span>
+                </h3>
+                <ul className="upgrades" role="list" aria-label="Per-note yield upgrades">
+                  {unlockedIds.map((id) => {
+                    const lvl = noteYieldLvls[id] ?? 0
+                    const mul = noteYieldMultiplier(lvl)
+                    const cost = noteYieldCost(id, lvl)
+                    const costNote = FIFTH_NEXT[id]
+                    const gateUnlocked = unlockedIds.includes(costNote)
+                    const affordable = gateUnlocked && canAffordPurse(currencies, cost)
+                    const nextMul = mul * YIELD_STEP
+                    const progress = gateUnlocked ? costProgress(currencies, cost) : 0
+                    const color = PAD_COLORS[id] ?? 'var(--text)'
+                    return (
+                      <li
+                        key={id}
+                        className={`upgrade upgrade-note${gateUnlocked ? '' : ' locked'}${affordable ? ' affordable' : ''}`}
+                        style={{ ['--chip-color' as string]: color }}
+                      >
+                        <header className="upgrade-head-row">
+                          <span
+                            className="upgrade-swatch"
+                            aria-hidden="true"
+                            style={{ background: color }}
+                          />
+                          <span className="upgrade-name">{id}</span>
+                          <span className="upgrade-lvl">lvl {lvl}</span>
+                        </header>
+                        <div className="upgrade-mul-row" aria-hidden="true">
+                          <span key={lvl} className="upgrade-mul">×{mul.toFixed(2)}</span>
+                          <span className="upgrade-arrow">→</span>
+                          <span className="upgrade-mul upgrade-mul-next">×{nextMul.toFixed(2)}</span>
+                        </div>
+                        {gateUnlocked ? (
+                          <CostChips cost={cost} purse={currencies} />
+                        ) : (
+                          <span className="upgrade-locked-msg">
+                            unlock <strong>{costNote}</strong> first
+                          </span>
+                        )}
+                        <span
+                          className="upgrade-progress"
+                          style={{ ['--p' as string]: progress.toFixed(3) }}
+                          aria-hidden="true"
+                        />
+                        <button
+                          type="button"
+                          className="upgrade-btn"
+                          disabled={!affordable}
+                          onClick={() => buyNoteYield(id)}
+                          aria-label={`Upgrade ${id} yield to lvl ${lvl + 1} (×${nextMul.toFixed(2)})`}
+                        >
+                          Upgrade
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             )}
           </section>
         </>
