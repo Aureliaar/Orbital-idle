@@ -28,6 +28,7 @@ const PLUCK_GAIN = 0.18
 const PLUCK_HIT_BOOST = 2.2
 
 const BURST_MS = 600
+const GLOW_LIFE_MS = 420
 
 const SLOT_KEYS = ['a', 's', 'd', 'f']
 
@@ -94,6 +95,31 @@ type Burst = {
   colorCloud: string
 }
 
+// Soft "noticed" feedback: a single partial just landed on a coincidence
+// hint, but no second partial is there yet to actually trigger a payout.
+// One brief expanding ring in the partial's color over the hint slot.
+type HintGlow = {
+  id: number
+  freq: number
+  bornMs: number
+  color: string
+}
+
+// Full "properly hit" feedback: a coincidence fired and minted currency.
+// We shower particles outward from the hint position so the reward reads
+// kinetically, on top of the blended halo + floating label from Burst.
+type Particle = {
+  id: number
+  x: number
+  y: number
+  vx: number
+  vy: number
+  bornMs: number
+  life: number
+  color: string
+  size: number
+}
+
 type Props = {
   unlockedIds: readonly BodyId[]
   slots: ReadonlyArray<readonly BodyId[]>
@@ -117,10 +143,14 @@ export function HarvestStage({
 }: Props) {
   const cloudGroupRef = useRef<SVGGElement>(null)
   const burstGroupRef = useRef<SVGGElement>(null)
+  const glowGroupRef = useRef<SVGGElement>(null)
+  const particleGroupRef = useRef<SVGGElement>(null)
   const emptyHintRef = useRef<SVGTextElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
+  const hintGlowsRef = useRef<HintGlow[]>([])
+  const particlesRef = useRef<Particle[]>([])
   const nextBurstIdRef = useRef(1)
   const coolingRef = useRef<Set<number>>(new Set())
   const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
@@ -147,13 +177,12 @@ export function HarvestStage({
     return s
   }, [slots])
 
-  // Every (unlocked note × partial 2..HARMONIC_COUNT) landing spot, deduped
-  // by frequency. Coincidence points where two notes share a partial (e.g.
-  // C·H3 ≡ G·H2 at 392 Hz) collapse into one hint whose color is the blend
-  // of the contributing notes — the chroma compass already covers H1, so
-  // we start at H2 to avoid overlapping the compass dots.
+  // Every coincidence spot reachable with the currently-unlocked notes:
+  // frequencies where two or more notes' harmonic series intersect. Solo
+  // partial positions are dropped — they're math markers, not gameplay
+  // anchors. Start at H2 because the chroma compass already covers H1.
   const harmonicHints = useMemo(() => {
-    type Hint = { freq: number; colors: string[] }
+    type Hint = { freq: number; colors: string[]; key: string }
     const map = new Map<string, Hint>()
     for (const id of unlockedIds) {
       const body = BODIES.find((b) => b.id === id)
@@ -166,12 +195,24 @@ export function HarvestStage({
         if (existing) {
           if (!existing.colors.includes(color)) existing.colors.push(color)
         } else {
-          map.set(key, { freq, colors: [color] })
+          map.set(key, { freq, colors: [color], key })
         }
       }
     }
-    return Array.from(map.values())
+    return Array.from(map.values()).filter((h) => h.colors.length > 1)
   }, [unlockedIds])
+
+  // Fast lookup the rAF/handleSlot paths use to decide whether a partial
+  // just landed on a hint slot (triggering the soft glow feedback).
+  const hintFreqSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const h of harmonicHints) s.add(h.key)
+    return s
+  }, [harmonicHints])
+  const hintFreqSetRef = useRef(hintFreqSet)
+  useEffect(() => {
+    hintFreqSetRef.current = hintFreqSet
+  }, [hintFreqSet])
 
   useEffect(() => {
     onEarnRef.current = onEarn
@@ -214,6 +255,30 @@ export function HarvestStage({
         if (now - bursts[i].bornMs < BURST_MS) bursts[bw++] = bursts[i]
       }
       bursts.length = bw
+
+      // Hint glows fade over GLOW_LIFE_MS; particles fly outward then fade
+      // over their per-particle life. Both decay arrays in-place to avoid
+      // GC pressure at 60 fps.
+      const glows = hintGlowsRef.current
+      let gW = 0
+      for (let i = 0; i < glows.length; i++) {
+        if (now - glows[i].bornMs < GLOW_LIFE_MS) glows[gW++] = glows[i]
+      }
+      glows.length = gW
+
+      const particles = particlesRef.current
+      let pW = 0
+      for (let i = 0; i < particles.length; i++) {
+        const part = particles[i]
+        if (now - part.bornMs >= part.life) continue
+        part.x += part.vx * dt
+        part.y += part.vy * dt
+        // Slight drag so particles ease to a stop rather than fly off-disc.
+        part.vx *= 0.96
+        part.vy *= 0.96
+        particles[pW++] = part
+      }
+      particles.length = pW
 
       const cloudG = cloudGroupRef.current
       if (cloudG) {
@@ -379,7 +444,53 @@ export function HarvestStage({
         burstG.replaceChildren(...nodes)
       }
 
-      const isEmpty = cloud.length === 0 && bursts.length === 0
+      // Hint glows: short expanding ring per soft hit (one partial landed
+      // on a coincidence slot, no payout yet). Renders above the static
+      // hint circles, below the cloud dots.
+      const glowG = glowGroupRef.current
+      if (glowG) {
+        const nodes: SVGElement[] = []
+        for (const g of glows) {
+          const u = (now - g.bornMs) / GLOW_LIFE_MS
+          const [x, y] = polar(g.freq)
+          const r = 6 + 14 * u
+          const alpha = (1 - u) * 0.85
+          const circle = document.createElementNS(SVG_NS, 'circle')
+          circle.setAttribute('cx', x.toFixed(2))
+          circle.setAttribute('cy', y.toFixed(2))
+          circle.setAttribute('r', r.toFixed(2))
+          circle.setAttribute('fill', 'none')
+          circle.setAttribute('stroke', g.color)
+          circle.setAttribute('stroke-opacity', String(alpha))
+          circle.setAttribute('stroke-width', '1.5')
+          nodes.push(circle)
+        }
+        glowG.replaceChildren(...nodes)
+      }
+
+      // Particles: small filled dots radiating from coincidence hit points.
+      // Size shrinks slightly with age and alpha falls off quadratically so
+      // the shower has a sharp leading edge and gentle trail.
+      const particleG = particleGroupRef.current
+      if (particleG) {
+        const nodes: SVGElement[] = []
+        for (const part of particles) {
+          const u = (now - part.bornMs) / part.life
+          const alpha = Math.max(0, (1 - u) * (1 - u))
+          const r = part.size * (1 - u * 0.4)
+          const circle = document.createElementNS(SVG_NS, 'circle')
+          circle.setAttribute('cx', part.x.toFixed(2))
+          circle.setAttribute('cy', part.y.toFixed(2))
+          circle.setAttribute('r', r.toFixed(2))
+          circle.setAttribute('fill', part.color)
+          circle.setAttribute('fill-opacity', String(alpha))
+          nodes.push(circle)
+        }
+        particleG.replaceChildren(...nodes)
+      }
+
+      const isEmpty =
+        cloud.length === 0 && bursts.length === 0 && glows.length === 0 && particles.length === 0
       if (isEmpty !== wasEmpty) {
         wasEmpty = isEmpty
         const hint = emptyHintRef.current
@@ -466,6 +577,8 @@ export function HarvestStage({
       // Note currency: per-note yield × auto penalty.
       purse[noteId] = (purse[noteId] ?? 0) + autoMul * yieldMul(noteId)
 
+      const hintSet = hintFreqSetRef.current
+
       for (const h of hits) {
         const freqKey = freqToCurrency(h.freq, TONIC_HZ)
         if (freqKey) {
@@ -479,6 +592,7 @@ export function HarvestStage({
             ? `+f${ratio} · ${interval}`
             : `+f${ratio}`
           : ''
+        const cloudColor = PAD_COLORS[h.cloudNoteId] ?? incomingColor
         burstsRef.current.push({
           id: nextBurstIdRef.current++,
           freq: h.freq,
@@ -486,7 +600,48 @@ export function HarvestStage({
           magnitude: h.bonus,
           label,
           colorIn: incomingColor,
-          colorCloud: PAD_COLORS[h.cloudNoteId] ?? incomingColor,
+          colorCloud: cloudColor,
+        })
+        // Particle shower from the hit point — the "properly hit" reward.
+        // 12 particles fan out at evenly-spaced angles with a little jitter,
+        // colored in the blend of the two contributing notes.
+        const [hx, hy] = polar(h.freq)
+        const blended = blendColors(incomingColor, cloudColor, 0.5)
+        const count = 12
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4
+          const speed = 110 + Math.random() * 70 // viewBox units / second
+          particlesRef.current.push({
+            id: nextBurstIdRef.current++,
+            x: hx,
+            y: hy,
+            vx: Math.cos(a) * speed,
+            vy: Math.sin(a) * speed,
+            bornMs: now,
+            life: 650 + Math.random() * 300,
+            color: blended,
+            size: 1.8 + Math.random() * 1.6,
+          })
+        }
+      }
+
+      // Soft glow when any new partial lands on a coincidence hint slot —
+      // even without a payout yet, the player should see that the spot
+      // they're aiming at lit up. The same path will fire bigger
+      // (burst + particles) on the second partial that completes the
+      // coincidence.
+      const coincidenceFreqs = new Set<string>()
+      for (const h of hits) coincidenceFreqs.add(h.freq.toFixed(3))
+      for (const ih of incoming) {
+        const key = ih.freq.toFixed(3)
+        // Skip if this partial already triggered the bigger burst path.
+        if (coincidenceFreqs.has(key)) continue
+        if (!hintSet.has(key)) continue
+        hintGlowsRef.current.push({
+          id: nextBurstIdRef.current++,
+          freq: ih.freq,
+          bornMs: now,
+          color: incomingColor,
         })
       }
 
@@ -742,25 +897,35 @@ export function HarvestStage({
           )
         })}
 
-        {/* Harmonic landing hints — one faint empty circle per unique
-            (unlocked-note × partial) frequency. Coincidence points (where
-            multiple partials share a frequency) collapse into a single
-            blend-colored ring, so the helix shows where dots *will* land
-            before the player plucks anything. */}
+        {/* Coincidence landing hints — every frequency where two or more
+            unlocked notes' harmonic series intersect (e.g. C·H3 ≡ G·H2 at
+            392 Hz). Stroke is the average of every contributing note's
+            color, so the eye reads "this spot is shared by these notes".
+            These are the harvestable targets; solo-partial positions are
+            intentionally omitted so the helix doesn't get noisy. */}
         {harmonicHints.map((hint) => {
           const [hx, hy] = polar(hint.freq)
           const color = averageColors(hint.colors)
           return (
-            <circle
-              key={hint.freq.toFixed(3)}
-              cx={hx}
-              cy={hy}
-              r={3.5}
-              fill="none"
-              stroke={color}
-              strokeOpacity={hint.colors.length > 1 ? 0.45 : 0.28}
-              strokeWidth={1}
-            />
+            <g key={hint.key}>
+              <circle
+                cx={hx}
+                cy={hy}
+                r={6.5}
+                fill={color}
+                fillOpacity={0.08}
+                stroke={color}
+                strokeOpacity={0.7}
+                strokeWidth={1.5}
+              />
+              <circle
+                cx={hx}
+                cy={hy}
+                r={2}
+                fill={color}
+                fillOpacity={0.55}
+              />
+            </g>
           )
         })}
 
@@ -772,9 +937,16 @@ export function HarvestStage({
           style={{ fill: 'var(--border)', fillOpacity: 0.6 }}
         />
 
+        {/* Hint glows — soft pulses when a single partial lands on a
+            coincidence slot (no payout yet). */}
+        <g ref={glowGroupRef} />
+
         {/* Dynamic layers — populated imperatively by the rAF loop. */}
         <g ref={cloudGroupRef} />
         <g ref={burstGroupRef} />
+
+        {/* Particles — kinetic reward shower when a coincidence fires. */}
+        <g ref={particleGroupRef} />
 
         {/* Empty-state hint — faded in/out from rAF when both layers empty.
             Sits inside the base ring so it doesn't fight the chroma compass. */}
