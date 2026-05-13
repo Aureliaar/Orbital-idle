@@ -195,11 +195,12 @@ export function HarvestStage({
 
         // Per-pluck spirals: group partials by (noteId, bornAt) so each
         // pluck draws its own log-spiral curve. r and θ are both linear in
-        // pitch p = log2(f/tonic), so the curve connecting H1..H6 is
-        // literally an Archimedean spiral in (r, θ) — we sample it densely
-        // (16 segments per partial-step) using the *un-wrapped* angle so
-        // every octave traces a full revolution rather than snapping back
-        // to 0 at the chroma seam.
+        // pitch p = log2(f/tonic), so the curve connecting H1..H6 is an
+        // Archimedean spiral in (r, θ). We step uniformly in p (≈96 samples
+        // per octave, ~4° per segment) so even tight inner turns render as
+        // smooth curves rather than a faceted polygon. The angle is the
+        // *un-wrapped* p·2π − π/2 so each octave is one full revolution
+        // instead of snapping back at the chroma seam.
         const groups = new Map<string, Harmonic[]>()
         for (const h of cloud) {
           const k = `${h.noteId}:${h.bornAt}`
@@ -207,7 +208,7 @@ export function HarvestStage({
           if (arr) arr.push(h)
           else groups.set(k, [h])
         }
-        const SPIRAL_STEPS_PER_PARTIAL = 16
+        const SPIRAL_STEPS_PER_OCTAVE = 96
         for (const g of groups.values()) {
           if (g.length < 2) continue
           g.sort((a, b) => a.partial - b.partial)
@@ -215,15 +216,14 @@ export function HarvestStage({
           const last = g[g.length - 1]
           const norm = Math.max(0, Math.min(1, first.amp / Math.max(first.bornAmp, 1e-6)))
           if (norm <= 0.05) continue
-          const fund = first.freq / first.partial
-          const steps = Math.max(2, (last.partial - first.partial) * SPIRAL_STEPS_PER_PARTIAL)
+          const pStart = pitchOf(first.freq)
+          const pEnd = pitchOf(last.freq)
+          const steps = Math.max(8, Math.ceil((pEnd - pStart) * SPIRAL_STEPS_PER_OCTAVE))
           let d = ''
           for (let i = 0; i <= steps; i++) {
             const t = i / steps
-            const n = first.partial + (last.partial - first.partial) * t
-            const freq = fund * n
-            const p = pitchOf(freq)
-            const ang = p * 2 * Math.PI - Math.PI / 2 // un-wrapped: each octave = one revolution
+            const p = pStart + (pEnd - pStart) * t
+            const ang = p * 2 * Math.PI - Math.PI / 2
             const r = R_BASE + (R_OUTER - R_BASE) * Math.min(1, p / P_MAX)
             const x = CX + r * Math.cos(ang)
             const y = CY + r * Math.sin(ang)
@@ -233,8 +233,8 @@ export function HarvestStage({
           path.setAttribute('d', d.trim())
           path.setAttribute('fill', 'none')
           path.setAttribute('stroke', PAD_COLORS[first.noteId] ?? '#aa3bff')
-          path.setAttribute('stroke-opacity', String(norm * 0.6))
-          path.setAttribute('stroke-width', '2')
+          path.setAttribute('stroke-opacity', String(norm * 0.35))
+          path.setAttribute('stroke-width', '1')
           path.setAttribute('stroke-linecap', 'round')
           path.setAttribute('stroke-linejoin', 'round')
           nodes.push(path)
