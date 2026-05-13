@@ -640,18 +640,18 @@ export function HarvestStage({
         })
         // Particle shower from the hit point to wherever this coincidence's
         // currency actually lives in the DOM (the chip with matching
-        // data-cur-key). Each particle arcs along a quadratic Bezier
-        // (perpendicular-offset control) and launches a few dozen ms after
-        // the previous one, so the cohort fans into arcs and trickles out
-        // like a quick arpeggio instead of firing as one synced volley.
-        // When the chip can't be found (locked currency, off-screen, no
-        // key) we fall back to a fan reaching above the helix — same
-        // shape, just untargeted.
+        // data-cur-key). Each particle arcs along a quadratic Bezier and
+        // launches a few dozen ms after the previous one, with both the
+        // arc magnitude and the inter-launch gap drawn from continuous
+        // distributions so the cohort feels organic instead of two clean
+        // streams + a metronome. When the chip can't be found (locked
+        // currency, off-screen, no key) we fall back to a fan reaching
+        // above the helix — same shape, just untargeted.
         const [hx, hy] = polar(h.freq)
         const blended = blendColors(incomingColor, cloudColor, 0.5)
         const target = freqKey ? chipTargetVB(freqKey, svgRef.current) : null
         const count = 10
-        const STAGGER_MS = 28
+        let delay = 0
         for (let i = 0; i < count; i++) {
           const spawnA = Math.random() * Math.PI * 2
           const spawnR = Math.random() * 4
@@ -669,16 +669,17 @@ export function HarvestStage({
             ty = hy + Math.sin(fanA) * dist
           }
           // Quadratic-Bezier control: midpoint offset perpendicular to the
-          // source→target line. Sign alternates by index so the cohort
-          // splits left/right, magnitude scales with distance (capped) so
-          // long flights aren't insanely curved.
+          // source→target line. Sign and magnitude are both fully random
+          // (uniform across [-maxMag, +maxMag]) so some particles curve
+          // hard left, some hard right, and some pass nearly straight
+          // through the middle — breaks the two-stream look.
           const dx = tx - x0
           const dy = ty - y0
           const dist = Math.hypot(dx, dy) || 1
           const perpX = -dy / dist
           const perpY = dx / dist
-          const sign = i % 2 === 0 ? 1 : -1
-          const curve = sign * Math.min(70, dist * (0.18 + Math.random() * 0.22))
+          const maxMag = Math.min(70, dist * 0.4)
+          const curve = (Math.random() - 0.5) * 2 * maxMag
           const cx = x0 + dx * 0.5 + perpX * curve
           const cy = y0 + dy * 0.5 + perpY * curve
           particlesRef.current.push({
@@ -689,11 +690,15 @@ export function HarvestStage({
             cy,
             tx,
             ty,
-            bornMs: now + i * STAGGER_MS,
-            life: 1150 + Math.random() * 550,
+            bornMs: now + delay,
+            life: 1000 + Math.random() * 900,
             color: blended,
             size: 1.8 + Math.random() * 1.6,
           })
+          // Variable inter-launch gap so the cohort spreads unevenly.
+          // Mean ~28 ms, range 14–42 ms — same total span as before but
+          // with no detectable beat.
+          delay += 14 + Math.random() * 28
         }
       }
 
