@@ -56,16 +56,18 @@ const chromaAngleOf = (freq: number) => {
   return frac * 2 * Math.PI - Math.PI / 2
 }
 
-// SVG viewBox + geometry. Fixed coordinate system so the renderer never has
-// to listen for resize — the CSS scales the <svg> and preserveAspectRatio
-// keeps the helix centred at any aspect ratio.
+// SVG viewBox + geometry. The container is square (CSS aspect-ratio: 1),
+// so the viewBox is too — no wasted horizontal space, and the helix fills
+// the disc. Fixed coordinate system means the renderer never has to listen
+// for resize; the CSS scales the <svg> and preserveAspectRatio keeps the
+// helix centred at any aspect ratio.
 const SVG_NS = 'http://www.w3.org/2000/svg'
-const VIEW_W = 480
-const VIEW_H = 360
+const VIEW_W = 400
+const VIEW_H = 400
 const CX = VIEW_W / 2
 const CY = VIEW_H / 2
-const R_OUTER = 148
-const R_BASE = 48
+const R_OUTER = 180
+const R_BASE = 64
 
 const radiusOf = (freq: number) => {
   const p = Math.max(0, pitchOf(freq))
@@ -190,31 +192,65 @@ export function HarvestStage({
       const cloudG = cloudGroupRef.current
       if (cloudG) {
         const nodes: SVGElement[] = []
+
+        // Per-pluck spirals: group partials by (noteId, bornAt) so each
+        // pluck's H1→H6 traces its own polyline. All 6 partials share a
+        // bornAt (one performance.now() call per pluck), so the key splits
+        // cleanly even on rapid re-plucks of the same note.
+        const groups = new Map<string, Harmonic[]>()
+        for (const h of cloud) {
+          const k = `${h.noteId}:${h.bornAt}`
+          const arr = groups.get(k)
+          if (arr) arr.push(h)
+          else groups.set(k, [h])
+        }
+        for (const g of groups.values()) {
+          if (g.length < 2) continue
+          g.sort((a, b) => a.partial - b.partial)
+          const first = g[0]
+          const norm = Math.max(0, Math.min(1, first.amp / Math.max(first.bornAmp, 1e-6)))
+          if (norm <= 0.05) continue
+          let d = ''
+          for (let i = 0; i < g.length; i++) {
+            const [x, y] = polar(g[i].freq)
+            d += `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)} `
+          }
+          const path = document.createElementNS(SVG_NS, 'path')
+          path.setAttribute('d', d.trim())
+          path.setAttribute('fill', 'none')
+          path.setAttribute('stroke', PAD_COLORS[first.noteId] ?? '#aa3bff')
+          path.setAttribute('stroke-opacity', String(norm * 0.55))
+          path.setAttribute('stroke-width', '1.75')
+          path.setAttribute('stroke-linecap', 'round')
+          path.setAttribute('stroke-linejoin', 'round')
+          nodes.push(path)
+        }
+
         for (const h of cloud) {
           const [x, y] = polar(h.freq)
           const norm = Math.max(0, Math.min(1, h.amp / Math.max(h.bornAmp, 1e-6)))
-          const opacity = Math.max(0.15, norm)
+          const opacity = Math.max(0.2, norm)
           const color = PAD_COLORS[h.noteId] ?? '#aa3bff'
           const isFund = h.partial === 1
-          const dotR = isFund ? 6 : Math.max(1.6, 4.5 / h.partial)
+          const dotR = isFund ? 9 : Math.max(2.6, 6.5 / h.partial)
 
           const dot = document.createElementNS(SVG_NS, 'circle')
           dot.setAttribute('cx', x.toFixed(2))
           dot.setAttribute('cy', y.toFixed(2))
           dot.setAttribute('r', dotR.toFixed(2))
           dot.setAttribute('fill', color)
-          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.8)))
+          dot.setAttribute('fill-opacity', String(opacity * (isFund ? 1 : 0.9)))
           nodes.push(dot)
 
           if (isFund) {
             const ring = document.createElementNS(SVG_NS, 'circle')
             ring.setAttribute('cx', x.toFixed(2))
             ring.setAttribute('cy', y.toFixed(2))
-            ring.setAttribute('r', (dotR + 2.5).toFixed(2))
+            ring.setAttribute('r', (dotR + 3).toFixed(2))
             ring.setAttribute('fill', 'none')
             ring.setAttribute('stroke', color)
             ring.setAttribute('stroke-opacity', String(opacity * 0.9))
-            ring.setAttribute('stroke-width', '1.25')
+            ring.setAttribute('stroke-width', '1.5')
             nodes.push(ring)
           }
         }
@@ -606,8 +642,8 @@ export function HarvestStage({
           const ang = chromaAngleOf(TONIC_HZ * body.ratio)
           const x = CX + R_BASE * Math.cos(ang)
           const y = CY + R_BASE * Math.sin(ang)
-          const lx = CX + (R_BASE + 14) * Math.cos(ang)
-          const ly = CY + (R_BASE + 14) * Math.sin(ang)
+          const lx = CX + (R_BASE + 17) * Math.cos(ang)
+          const ly = CY + (R_BASE + 17) * Math.sin(ang)
           const isOn = slotted.has(body.id)
           const color = PAD_COLORS[body.id] ?? '#aa3bff'
           return (
@@ -615,9 +651,9 @@ export function HarvestStage({
               <circle
                 cx={x}
                 cy={y}
-                r={isOn ? 4 : 2.5}
+                r={isOn ? 5.5 : 3.5}
                 fill={color}
-                fillOpacity={isOn ? 0.4 : 0.18}
+                fillOpacity={isOn ? 0.5 : 0.22}
               />
               <text
                 x={lx}
@@ -625,9 +661,10 @@ export function HarvestStage({
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fontFamily="ui-monospace, Menlo, Consolas, monospace"
-                fontSize="11"
+                fontSize="13"
+                fontWeight={isOn ? 600 : 400}
                 fill={color}
-                fillOpacity={isOn ? 0.95 : 0.45}
+                fillOpacity={isOn ? 1 : 0.55}
               >
                 {body.id}
               </text>
@@ -647,15 +684,16 @@ export function HarvestStage({
         <g ref={cloudGroupRef} />
         <g ref={burstGroupRef} />
 
-        {/* Empty-state hint — faded in/out from rAF when both layers empty. */}
+        {/* Empty-state hint — faded in/out from rAF when both layers empty.
+            Sits inside the base ring so it doesn't fight the chroma compass. */}
         <text
           ref={emptyHintRef}
           x={CX}
-          y={CY + R_OUTER + 22}
+          y={CY + R_BASE * 0.55}
           textAnchor="middle"
           dominantBaseline="middle"
           fontFamily="ui-monospace, Menlo, Consolas, monospace"
-          fontSize="12"
+          fontSize="13"
           style={{ fill: 'var(--text-h)', opacity: 0.35, transition: 'opacity 120ms ease' }}
         >
           tap a slot to play
