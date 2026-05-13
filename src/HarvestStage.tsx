@@ -147,6 +147,32 @@ export function HarvestStage({
     return s
   }, [slots])
 
+  // Every (unlocked note × partial 2..HARMONIC_COUNT) landing spot, deduped
+  // by frequency. Coincidence points where two notes share a partial (e.g.
+  // C·H3 ≡ G·H2 at 392 Hz) collapse into one hint whose color is the blend
+  // of the contributing notes — the chroma compass already covers H1, so
+  // we start at H2 to avoid overlapping the compass dots.
+  const harmonicHints = useMemo(() => {
+    type Hint = { freq: number; colors: string[] }
+    const map = new Map<string, Hint>()
+    for (const id of unlockedIds) {
+      const body = BODIES.find((b) => b.id === id)
+      if (!body) continue
+      const color = PAD_COLORS[id]
+      for (let n = 2; n <= HARMONIC_COUNT; n++) {
+        const freq = TONIC_HZ * body.ratio * n
+        const key = freq.toFixed(3)
+        const existing = map.get(key)
+        if (existing) {
+          if (!existing.colors.includes(color)) existing.colors.push(color)
+        } else {
+          map.set(key, { freq, colors: [color] })
+        }
+      }
+    }
+    return Array.from(map.values())
+  }, [unlockedIds])
+
   useEffect(() => {
     onEarnRef.current = onEarn
   }, [onEarn])
@@ -716,6 +742,28 @@ export function HarvestStage({
           )
         })}
 
+        {/* Harmonic landing hints — one faint empty circle per unique
+            (unlocked-note × partial) frequency. Coincidence points (where
+            multiple partials share a frequency) collapse into a single
+            blend-colored ring, so the helix shows where dots *will* land
+            before the player plucks anything. */}
+        {harmonicHints.map((hint) => {
+          const [hx, hy] = polar(hint.freq)
+          const color = averageColors(hint.colors)
+          return (
+            <circle
+              key={hint.freq.toFixed(3)}
+              cx={hx}
+              cy={hy}
+              r={3.5}
+              fill="none"
+              stroke={color}
+              strokeOpacity={hint.colors.length > 1 ? 0.45 : 0.28}
+              strokeWidth={1}
+            />
+          )
+        })}
+
         {/* Tonic anchor at the centre. */}
         <circle
           cx={CX}
@@ -984,5 +1032,21 @@ function blendColors(c1: string, c2: string, t = 0.5): string {
   const g = Math.round(a[1] * (1 - t) + b[1] * t)
   const bl = Math.round(a[2] * (1 - t) + b[2] * t)
   return `rgb(${r},${g},${bl})`
+}
+
+function averageColors(colors: readonly string[]): string {
+  if (colors.length === 0) return '#aa3bff'
+  if (colors.length === 1) return colors[0]
+  let r = 0, g = 0, b = 0, n = 0
+  for (const c of colors) {
+    const parsed = parseHex(c)
+    if (!parsed) continue
+    r += parsed[0]
+    g += parsed[1]
+    b += parsed[2]
+    n++
+  }
+  if (n === 0) return colors[0]
+  return `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
 }
 
