@@ -27,8 +27,8 @@ import type { Coincidence, Harmonic } from './harmonics'
 const PLUCK_GAIN = 0.18
 const PLUCK_HIT_BOOST = 2.2
 
-const BURST_MS = 600
-const GLOW_LIFE_MS = 420
+const BURST_MS = 900
+const GLOW_LIFE_MS = 600
 
 const SLOT_KEYS = ['a', 's', 'd', 'f']
 
@@ -128,12 +128,20 @@ type HintGlow = {
 // Each particle eases from its spawn point to a target — usually the DOM
 // rect of the currency chip the payout went to (looked up via
 // `data-cur-key`), so the reward visually arrives where the counter ticks
-// up. Falls back to a point well above the helix when the chip can't be
-// located (locked currency, off-screen, etc.).
+// up. The path is a quadratic Bezier with a perpendicular-offset control
+// point so the particle arcs rather than running straight, and the cohort
+// is born staggered (bornMs is in the future for later indices) so the
+// shower trickles out like an arpeggio. Falls back to a fan above the
+// helix when the chip can't be located.
 type Particle = {
   id: number
   x0: number
   y0: number
+  // Quadratic Bezier control point — offset perpendicular to the source→
+  // target line by a per-particle signed magnitude, so each particle
+  // bends a different way and the cohort fans into arcs.
+  cx: number
+  cy: number
   tx: number
   ty: number
   bornMs: number
@@ -293,7 +301,9 @@ export function HarvestStage({
       let pW = 0
       for (let i = 0; i < particles.length; i++) {
         const part = particles[i]
-        if (now - part.bornMs >= part.life) continue
+        // bornMs can be in the future for staggered launches — keep those.
+        // Only drop a particle once its full life has elapsed past bornMs.
+        if (now >= part.bornMs && now - part.bornMs >= part.life) continue
         particles[pW++] = part
       }
       particles.length = pW
@@ -486,18 +496,22 @@ export function HarvestStage({
         glowG.replaceChildren(...nodes)
       }
 
-      // Particles: each one eases from (x0, y0) on the helix to (tx, ty) on
-      // the currency chip the coincidence paid out to. Ease-out cubic gives
-      // a fast launch and a soft landing right as the alpha fades to zero,
-      // so visually the particle "delivers" the reward to the counter.
+      // Particles: each one eases along a quadratic Bezier from (x0, y0)
+      // on the helix, through a perpendicular-offset control (cx, cy), to
+      // (tx, ty) on the currency chip. Sine easing softens both ends of
+      // the trip, and staggered bornMs means later particles haven't even
+      // launched yet — they sit invisible until their time comes, then
+      // arc out like a delayed note in a phrase.
       const particleG = particleGroupRef.current
       if (particleG) {
         const nodes: SVGElement[] = []
         for (const part of particles) {
+          if (now < part.bornMs) continue
           const u = Math.min(1, (now - part.bornMs) / part.life)
-          const eased = 1 - Math.pow(1 - u, 3)
-          const x = part.x0 + (part.tx - part.x0) * eased
-          const y = part.y0 + (part.ty - part.y0) * eased
+          const eased = Math.sin((u * Math.PI) / 2)
+          const e1 = 1 - eased
+          const x = e1 * e1 * part.x0 + 2 * e1 * eased * part.cx + eased * eased * part.tx
+          const y = e1 * e1 * part.y0 + 2 * e1 * eased * part.cy + eased * eased * part.ty
           const alpha = Math.max(0, (1 - u) * (1 - u))
           const r = part.size * (1 - u * 0.4)
           const circle = document.createElementNS(SVG_NS, 'circle')
@@ -626,15 +640,18 @@ export function HarvestStage({
         })
         // Particle shower from the hit point to wherever this coincidence's
         // currency actually lives in the DOM (the chip with matching
-        // data-cur-key). Each particle gets a small spawn offset and a
-        // small target offset so they spread out instead of marching in
-        // single file. When the chip can't be found (locked currency,
-        // off-screen, no key) we fall back to a fan that rises above the
-        // helix — still satisfying, just untargeted.
+        // data-cur-key). Each particle arcs along a quadratic Bezier
+        // (perpendicular-offset control) and launches a few dozen ms after
+        // the previous one, so the cohort fans into arcs and trickles out
+        // like a quick arpeggio instead of firing as one synced volley.
+        // When the chip can't be found (locked currency, off-screen, no
+        // key) we fall back to a fan reaching above the helix — same
+        // shape, just untargeted.
         const [hx, hy] = polar(h.freq)
         const blended = blendColors(incomingColor, cloudColor, 0.5)
         const target = freqKey ? chipTargetVB(freqKey, svgRef.current) : null
-        const count = 12
+        const count = 10
+        const STAGGER_MS = 28
         for (let i = 0; i < count; i++) {
           const spawnA = Math.random() * Math.PI * 2
           const spawnR = Math.random() * 4
@@ -646,20 +663,34 @@ export function HarvestStage({
             tx = target[0] + (Math.random() - 0.5) * 18
             ty = target[1] + (Math.random() - 0.5) * 10
           } else {
-            // Fallback: an upper-cone fan reaching above the helix.
             const fanA = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.9
             const dist = 110 + Math.random() * 60
             tx = hx + Math.cos(fanA) * dist
             ty = hy + Math.sin(fanA) * dist
           }
+          // Quadratic-Bezier control: midpoint offset perpendicular to the
+          // source→target line. Sign alternates by index so the cohort
+          // splits left/right, magnitude scales with distance (capped) so
+          // long flights aren't insanely curved.
+          const dx = tx - x0
+          const dy = ty - y0
+          const dist = Math.hypot(dx, dy) || 1
+          const perpX = -dy / dist
+          const perpY = dx / dist
+          const sign = i % 2 === 0 ? 1 : -1
+          const curve = sign * Math.min(70, dist * (0.18 + Math.random() * 0.22))
+          const cx = x0 + dx * 0.5 + perpX * curve
+          const cy = y0 + dy * 0.5 + perpY * curve
           particlesRef.current.push({
             id: nextBurstIdRef.current++,
             x0,
             y0,
+            cx,
+            cy,
             tx,
             ty,
-            bornMs: now,
-            life: 650 + Math.random() * 300,
+            bornMs: now + i * STAGGER_MS,
+            life: 1150 + Math.random() * 550,
             color: blended,
             size: 1.8 + Math.random() * 1.6,
           })
