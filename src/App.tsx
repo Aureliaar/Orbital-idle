@@ -90,12 +90,14 @@ const autoPluckCost = (slotIdx: number): CurrencyPurse => {
   return out
 }
 
-// Slot 2 is intentionally cheap and unlock-able from C alone: with one
-// slot you can't make a coincidence yet, so the freq requirement would
-// be unreachable. Slot 3 demands freq currency — by then you've had a
-// pair of slots ringing together for a while.
+// Slot 2 unlocks once E is in hand and costs a single E — the gate note
+// itself pays for the slot, so the player has to mint E before the slot is
+// reachable, but the price is symbolic. With one slot you can't make a
+// coincidence yet, so a freq requirement would be unreachable. Slot 3
+// demands freq currency — by then you've had a pair of slots ringing
+// together for a while.
 const SLOT_UNLOCK_COSTS: Record<number, CurrencyPurse> = {
-  2: { C: 8 },
+  2: { E: 1 },
   3: { C: 30, E: 18, G: 12, F3: 4, F5: 6 },
 }
 const SLOT_UNLOCK_GATES: Record<number, BodyId> = {
