@@ -3,8 +3,8 @@ import { AMSynth, Context, FMSynth, Panner, PluckSynth, setContext } from 'tone'
 import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
-import type { Body, BodyId } from './bodies'
-import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
+import type { Body, BodyId, Orbit, OrbitId } from './bodies'
+import { BODIES, EARTH, ORBITS, TARGETS } from './bodies'
 import { HarvestStage } from './HarvestStage'
 import {
   addToPurse,
@@ -202,7 +202,9 @@ const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
   })
 }
 
-const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
+// Sorted inside→out by orbital period so visual radii grow outward.
+const RENDER_ORBITS: Orbit[] = [...ORBITS].sort((a, b) => a.period - b.period)
+const PLANET_BY_ID: Map<BodyId, Body> = new Map(BODIES.map((b) => [b.id, b]))
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -319,7 +321,7 @@ function App() {
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
   const launchRequestRef = useRef<BodyId | null>(null)
-  const phaseRef = useRef<Map<BodyId, number>>(new Map())
+  const phaseRef = useRef<Map<OrbitId, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
@@ -359,16 +361,18 @@ function App() {
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
 
-      const earthAngle = ((t / EARTH_PERIOD_S) + EARTH.phase) * 2 * Math.PI
+      const earthOrbit = RENDER_ORBITS.find((o) => o.planetId === EARTH.id)!
+      const earthAngle = ((t / earthOrbit.period) + earthOrbit.phase) * 2 * Math.PI
 
-      const positions = ORBITS.map((body, i) => {
-        const r = rMin + (rMax - rMin) * (i / (ORBITS.length - 1))
-        const angle = ((t / periodOf(body)) + body.phase) * 2 * Math.PI
+      const positions = RENDER_ORBITS.map((orbit, i) => {
+        const planet = PLANET_BY_ID.get(orbit.planetId)!
+        const r = rMin + (rMax - rMin) * (i / (RENDER_ORBITS.length - 1))
+        const angle = ((t / orbit.period) + orbit.phase) * 2 * Math.PI
         let delta = Math.abs(((earthAngle - angle) % (2 * Math.PI)))
         if (delta > Math.PI) delta = 2 * Math.PI - delta
-        return { body, angle, r, delta }
+        return { orbit, planet, angle, r, delta }
       })
-      const earthPos = positions.find((p) => p.body.id === EARTH.id)!
+      const earthPos = positions.find((p) => p.planet.id === EARTH.id)!
 
       const swells = swellsRef.current
       const launchedId = launchRequestRef.current
@@ -381,9 +385,9 @@ function App() {
         }
       }
 
-      for (const { body, delta } of positions) {
-        if (body.id === EARTH.id) continue
-        const s = swells.get(body.id)
+      for (const { planet, delta } of positions) {
+        if (planet.id === EARTH.id) continue
+        const s = swells.get(planet.id)
         if (!s) continue
         const proximity = 1 - delta / Math.PI
         const target = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * Math.pow(proximity, 3)
@@ -410,20 +414,20 @@ function App() {
         if (v < 0.001) return
         voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
       }
-      for (const { body } of positions) {
-        const phase = ((t / periodOf(body)) + body.phase) % 1
-        const last = phases.get(body.id)
-        phases.set(body.id, phase)
+      for (const { orbit, planet } of positions) {
+        const phase = ((t / orbit.period) + orbit.phase) % 1
+        const last = phases.get(orbit.id)
+        phases.set(orbit.id, phase)
         if (last === undefined) continue
         const wrapped = phase < last
         if (!wrapped) continue
         if (!audioReady) continue
-        if (body.id === EARTH.id) {
+        if (planet.id === EARTH.id) {
           strike(a!.earth, EARTH_VELOCITY)
         } else {
-          const voice = a!.voices.get(body.id)
+          const voice = a!.voices.get(planet.id)
           if (!voice) continue
-          const s = swells.get(body.id)
+          const s = swells.get(planet.id)
           const norm = s
             ? (s.held - VOICE_FLOOR_GAIN) / (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN)
             : 0
@@ -448,8 +452,8 @@ function App() {
 
       ctx.fillStyle = accentBg
       let anyAligned = false
-      for (const { body, angle, r, delta } of positions) {
-        if (body.id === EARTH.id) continue
+      for (const { planet, angle, r, delta } of positions) {
+        if (planet.id === EARTH.id) continue
         const proximity = 1 - delta / Math.PI
         if (proximity > HALO_PROXIMITY) {
           const px = cx + Math.cos(angle) * r
@@ -473,11 +477,11 @@ function App() {
       ctx.arc(cx, cy, 2, 0, 2 * Math.PI)
       ctx.fill()
 
-      for (const { body, angle, r } of positions) {
+      for (const { planet, angle, r } of positions) {
         const px = cx + Math.cos(angle) * r
         const py = cy + Math.sin(angle) * r
-        const isEarth = body.id === EARTH.id
-        ctx.fillStyle = isEarth ? textH : nextArmed[body.id] ? accent : textM
+        const isEarth = planet.id === EARTH.id
+        ctx.fillStyle = isEarth ? textH : nextArmed[planet.id] ? accent : textM
         ctx.beginPath()
         ctx.arc(px, py, isEarth ? 6 : 5, 0, 2 * Math.PI)
         ctx.fill()
@@ -490,7 +494,7 @@ function App() {
           toRemove.push(id)
           return
         }
-        const target = positions.find((p) => p.body.id === id)
+        const target = positions.find((p) => p.planet.id === id)
         if (!target) return
         const r = earthPos.r + (target.r - earthPos.r) * u
         let delta = (target.angle - earthAngle) % (2 * Math.PI)
@@ -582,7 +586,7 @@ function App() {
 
   const primePhases = useCallback(() => {
     phaseRef.current.clear()
-    for (const body of BODIES) phaseRef.current.set(body.id, 0.999)
+    for (const orbit of ORBITS) phaseRef.current.set(orbit.id, 0.999)
   }, [])
 
   useEffect(() => {
