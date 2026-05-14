@@ -1678,6 +1678,22 @@ main h1 {
   color: var(--text-h);
 }
 
+.station-dev-finish {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px dashed color-mix(in srgb, var(--chip-color) 40%, var(--border));
+  background: transparent;
+  color: var(--text);
+  opacity: 0.55;
+  cursor: pointer;
+}
+.station-dev-finish:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
+}
+
 /* --- Launch gate / cargo manifest --- */
 
 .launch-gate,

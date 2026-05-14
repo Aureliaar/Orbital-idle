@@ -484,6 +484,29 @@ function App() {
     [],
   )
 
+  const devFinishActiveStation = useCallback(() => {
+    updateStation(activeStationId, (s) => {
+      const inKey = inKeyPartialSet(activeBody, HARMONIC_COUNT)
+      const tonic = activeBody.id
+      const slotNotes = [
+        Array.from({ length: MAX_SLOT0_CAPACITY }, (_, i) => inKey[i] ?? tonic),
+        [inKey[1] ?? tonic],
+        [inKey[2] ?? tonic],
+      ]
+      const yields: Partial<Record<BodyId, number>> = { ...s.noteYieldLvls }
+      for (const id of inKey) yields[id] = Math.max(1, yields[id] ?? 0)
+      return {
+        ...s,
+        unlocked: true,
+        slotCount: MAX_SLOT_COUNT,
+        slot0Capacity: MAX_SLOT0_CAPACITY,
+        slots: slotNotes,
+        autoPluckSlots: new Set([0, 1, 2]),
+        noteYieldLvls: yields,
+      }
+    })
+  }, [updateStation, activeStationId, activeBody])
+
   const earn = useCallback((delta: CurrencyPurse) => {
     const touched = (Object.keys(delta) as CurrencyKey[]).filter(
       (k) => (delta[k] ?? 0) > 0,
@@ -1387,6 +1410,7 @@ function App() {
             stage1={activeStation.stage1}
             stage2={activeStation.stage2}
             exportable={activeStation.exportable}
+            onDevFinish={devFinishActiveStation}
           />
           <section ref={progressRef} className="resonator-progress" aria-label="Progression">
             {visibleIdleEntries.length > 0 && (

@@ -167,6 +167,8 @@ type Props = {
   stage1: boolean
   stage2: boolean
   exportable: ReadonlySet<BodyId>
+  // Dev affordance: skip the grind to evaluate end-state.
+  onDevFinish?: () => void
 }
 
 export function HarvestStage({
@@ -181,6 +183,7 @@ export function HarvestStage({
   stage1,
   stage2,
   exportable,
+  onDevFinish,
 }: Props) {
   // In-key partials of the station's tonic — the only pitch classes the
   // resonator at this planet can mint locally, and the only notes the
@@ -977,6 +980,16 @@ export function HarvestStage({
             </span>
           )}
         </span>
+        {onDevFinish && (
+          <button
+            type="button"
+            className="station-dev-finish"
+            onClick={onDevFinish}
+            title="Dev: max slots, capacity, auto-pluck, and yield levels on this station"
+          >
+            ⏭ dev finish
+          </button>
+        )}
       </header>
       <svg
         ref={svgRef}
