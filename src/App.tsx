@@ -286,7 +286,12 @@ function App() {
 
       const cx = cssW / 2
       const cy = cssH / 2
-      const orbitR = Math.min(cssW, cssH) * 0.32
+      const minDim = Math.min(cssW, cssH)
+      // Two concentric rings, one per chord. Both rotate at the phrase
+      // period; chord identity decides which ring a moon rides on.
+      const innerR = minDim * 0.23
+      const outerR = minDim * 0.38
+      const radiusOf = (chord: ChordId) => (chord === 'i' ? innerR : outerR)
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
@@ -297,7 +302,8 @@ function App() {
       const positions = MOONS.map((moon) => {
         const phase = ((t / moon.period) + moon.phase) % 1
         const angle = phase * 2 * Math.PI
-        return { moon, phase, angle }
+        const r = radiusOf(moon.chordId)
+        return { moon, phase, angle, r }
       })
 
       // Strike loop: each moon fires its single tone on perihelion
@@ -317,20 +323,24 @@ function App() {
 
       // --- Render ---
 
-      // Orbital ring.
+      // Two orbital rings — inner for i, outer for V.
       ctx.strokeStyle = border
       ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.arc(cx, cy, orbitR, 0, 2 * Math.PI)
-      ctx.stroke()
+      for (const r of [innerR, outerR]) {
+        ctx.beginPath()
+        ctx.arc(cx, cy, r, 0, 2 * Math.PI)
+        ctx.stroke()
+      }
 
-      // Perihelion marker (3 o'clock) — the fire pointer.
+      // Perihelion markers (3 o'clock) — one tick per ring.
       ctx.strokeStyle = textM
       ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(cx + orbitR - 8, cy)
-      ctx.lineTo(cx + orbitR + 8, cy)
-      ctx.stroke()
+      for (const r of [innerR, outerR]) {
+        ctx.beginPath()
+        ctx.moveTo(cx + r - 7, cy)
+        ctx.lineTo(cx + r + 7, cy)
+        ctx.stroke()
+      }
 
       // Center planet (A tonic).
       ctx.fillStyle = tonicColor
@@ -343,10 +353,10 @@ function App() {
       ctx.textBaseline = 'middle'
       ctx.fillText('A', cx, cy)
 
-      // Six moons.
-      for (const { moon, angle } of positions) {
-        const mx = cx + Math.cos(angle) * orbitR
-        const my = cy + Math.sin(angle) * orbitR
+      // Six moons — three per ring.
+      for (const { moon, angle, r: ringR } of positions) {
+        const mx = cx + Math.cos(angle) * ringR
+        const my = cy + Math.sin(angle) * ringR
         const flashStart = fireFlashRef.current.get(moon.id) ?? -Infinity
         const flash = Math.max(0, 1 - (now - flashStart) / FIRE_FLASH_MS)
         const r = 9 + flash * 7
@@ -607,7 +617,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Für Elise · A tonic · six moons share an orbit, each fires one note at perihelion'
+          ? 'Für Elise · A tonic · inner ring arpeggiates i, outer ring arpeggiates V'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
