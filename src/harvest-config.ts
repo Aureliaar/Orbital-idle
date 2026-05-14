@@ -115,6 +115,48 @@ export const FREQ_COLORS: Record<FreqCurrency, string> = {
   F15_2: '#dc4836',
 }
 
+// For each coincidence frequency, the set of notes whose harmonic series
+// reach that frequency — i.e. the notes that can collaborate to mint it.
+// Computed once at module load by enumerating every diatonic pair's
+// partials up to HARMONIC_COUNT and bucketing by the FreqCurrency each
+// landing maps to. Used by the UI to show, on every freq chip, which
+// notes the player needs in play to earn more of it.
+export const FREQ_SOURCES: Record<FreqCurrency, readonly BodyId[]> = (() => {
+  const order: Record<BodyId, number> = {} as Record<BodyId, number>
+  NOTE_CURRENCIES.forEach((id, idx) => {
+    order[id] = idx
+  })
+  const acc: Partial<Record<FreqCurrency, Set<BodyId>>> = {}
+  for (let i = 0; i < BODIES.length; i++) {
+    for (let j = i + 1; j < BODIES.length; j++) {
+      const a = BODIES[i]
+      const b = BODIES[j]
+      for (let n = 1; n <= HARMONIC_COUNT; n++) {
+        for (let m = 1; m <= HARMONIC_COUNT; m++) {
+          const f1 = a.ratio * n
+          const f2 = b.ratio * m
+          if (Math.abs(f1 - f2) / Math.max(f1, f2) > COINCIDENCE_TOL) continue
+          const key = freqToCurrency(f1 * TONIC_HZ, TONIC_HZ)
+          if (!key) continue
+          let s = acc[key]
+          if (!s) {
+            s = new Set<BodyId>()
+            acc[key] = s
+          }
+          s.add(a.id)
+          s.add(b.id)
+        }
+      }
+    }
+  }
+  const out: Partial<Record<FreqCurrency, readonly BodyId[]>> = {}
+  for (const { key } of FREQ_CURRENCIES) {
+    const set = acc[key] ?? new Set<BodyId>()
+    out[key] = [...set].sort((a, b) => order[a] - order[b])
+  }
+  return out as Record<FreqCurrency, readonly BodyId[]>
+})()
+
 // Convert a coincidence frequency (Hz) to the matching FreqCurrency key,
 // or null if the freq doesn't match any known coincidence (shouldn't
 // happen for diatonic input but defensively handled).
