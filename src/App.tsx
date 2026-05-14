@@ -371,6 +371,7 @@ function ReadyBadge() {
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const progressRef = useRef<HTMLElement | null>(null)
   const probesRef = useRef<Map<BodyId, Probe>>(new Map())
   const armedRef = useRef<ArmedMap>({})
   const [armed, setArmed] = useState<ArmedMap>({})
@@ -911,6 +912,61 @@ function App() {
       return a.lvl - b.lvl
     })[0]
 
+  // Aggregate every visible buy that's currently affordable, in display
+  // order. Feeds both the scroll cue under the currencies panel and the
+  // tiny "this purse is contributing to a ready buy" dot on the chips
+  // themselves — same source of truth, two views.
+  type ReadyBuy = { label: string; costKeys: CurrencyKey[] }
+  const readyBuys: ReadyBuy[] = []
+  for (const id of nextUnlocks) {
+    const cost = UNLOCK_COSTS[id]
+    if (canAffordPurse(currencies, cost)) {
+      readyBuys.push({
+        label: `Unlock ${id}`,
+        costKeys: (Object.keys(cost) as CurrencyKey[]).filter((k) => (cost[k] ?? 0) > 0),
+      })
+    }
+  }
+  if (nextSlotCost && canAffordSlot) {
+    readyBuys.push({
+      label: `Slot ${nextSlotIdx}`,
+      costKeys: (Object.keys(nextSlotCost) as CurrencyKey[]).filter(
+        (k) => (nextSlotCost[k] ?? 0) > 0,
+      ),
+    })
+  }
+  if (slot0CapCost && canAffordSlot0Cap) {
+    readyBuys.push({
+      label: `Stack ${nextSlot0Cap}`,
+      costKeys: (Object.keys(slot0CapCost) as CurrencyKey[]).filter(
+        (k) => (slot0CapCost[k] ?? 0) > 0,
+      ),
+    })
+  }
+  for (const slotIdx of autoPluckSlotsToOffer) {
+    const cost = autoPluckCost(slotIdx)
+    if (canAffordPurse(currencies, cost)) {
+      readyBuys.push({
+        label: `Auto slot ${slotIdx + 1}`,
+        costKeys: (Object.keys(cost) as CurrencyKey[]).filter((k) => (cost[k] ?? 0) > 0),
+      })
+    }
+  }
+  if (visibleYieldOption?.affordable) {
+    readyBuys.push({
+      label: `${visibleYieldOption.id} yield`,
+      costKeys: (Object.keys(visibleYieldOption.cost) as CurrencyKey[]).filter(
+        (k) => (visibleYieldOption.cost[k] ?? 0) > 0,
+      ),
+    })
+  }
+  const readyChipKeys = new Set<CurrencyKey>()
+  for (const b of readyBuys) for (const k of b.costKeys) readyChipKeys.add(k)
+
+  const scrollToProgress = useCallback(() => {
+    progressRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
   const onLaunch = useCallback((body: Body) => {
     if (!armedRef.current[body.id]) return
     if (probesRef.current.has(body.id)) return
@@ -989,13 +1045,18 @@ function App() {
             visibleNoteCurrencies.map((k) => {
               const v = currencies[k] ?? 0
               const color = PAD_COLORS[k]
+              const ready = readyChipKeys.has(k)
               return (
                 <li
                   key={k}
-                  className="cur-chip cur-chip-note"
+                  className={`cur-chip cur-chip-note${ready ? ' cur-chip-ready' : ''}`}
                   data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
-                  title={`${k} — minted by tapping ${k}`}
+                  title={
+                    ready
+                      ? `${k} — minted by tapping ${k} (contributing to a ready buy)`
+                      : `${k} — minted by tapping ${k}`
+                  }
                 >
                   <span className="cur-swatch" aria-hidden="true" />
                   <span className="cur-key">{k}</span>
@@ -1014,10 +1075,11 @@ function App() {
               const interval = FREQ_INTERVAL_LABEL[k] ?? ''
               const sources = FREQ_SOURCES[k] ?? []
               const sourceText = sources.join('×') || '—'
+              const ready = readyChipKeys.has(k)
               return (
                 <li
                   key={k}
-                  className="cur-chip cur-chip-harm"
+                  className={`cur-chip cur-chip-harm${ready ? ' cur-chip-ready' : ''}`}
                   data-cur-key={k}
                   style={{ ['--chip-color' as string]: color }}
                   title={`ƒ${ratio} · ${interval} — minted when ${sourceText} partials coincide at ${ratio}·tonic`}
@@ -1040,6 +1102,21 @@ function App() {
               )
             })}
           </ul>
+        )}
+        {tab === 'harvest' && readyBuys.length > 0 && (
+          <button
+            type="button"
+            className="cur-ready-cue"
+            onClick={scrollToProgress}
+            aria-label={`${readyBuys.length} buy${readyBuys.length === 1 ? '' : 's'} ready — scroll to progression panel`}
+          >
+            <span aria-hidden="true">▼</span>
+            <span>
+              {readyBuys.length === 1
+                ? `${readyBuys[0].label} ready`
+                : `${readyBuys.length} ready`}
+            </span>
+          </button>
         )}
       </section>
       <section className="stage" hidden={tab !== 'orbits'} aria-hidden={tab !== 'orbits'}>
@@ -1112,7 +1189,7 @@ function App() {
             onSlotChange={handleSlotChange}
             onEarn={earn}
           />
-          <section className="resonator-progress" aria-label="Progression">
+          <section ref={progressRef} className="resonator-progress" aria-label="Progression">
             {anyAutoPluck && visibleIdleEntries.length > 0 && (
               <div className="prog-section prog-idle" aria-label="Idle rate">
                 <h3 className="prog-h">

@@ -474,6 +474,7 @@ main h1 {
 
 .cur-chip {
   --chip-color: var(--text);
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -484,6 +485,37 @@ main h1 {
   font-size: 0.82rem;
   color: var(--text-h);
   transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* Ready dot — a small chip-colored bead in the top-right corner of any
+   chip whose purse balance is contributing to an affordable buy. The
+   ring (box-shadow against --bg) lifts it off the chip so it reads as
+   a tag rather than a typo. Pairs with the "▼ ready" cue under the
+   chip row, so the player can see both *that* something's ready and
+   *which currencies* are funding it. */
+.cur-chip-ready::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--chip-color);
+  box-shadow: 0 0 0 2px var(--bg);
+  animation: chip-ready-dot 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes chip-ready-dot {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
 }
 
 .cur-chip:hover {
@@ -543,6 +575,49 @@ main h1 {
   height: 6px;
   border-radius: 50%;
   opacity: 0.9;
+}
+
+/* Scroll cue — a compact pill that surfaces under the currency chips
+   when any visible buy is affordable but the panel that holds it is
+   likely below the fold. Tapping smooth-scrolls to the panel. Kept
+   thin and accent-colored so it reads as a sibling of the currency
+   chips rather than a heavyweight banner. */
+.cur-ready-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  margin-top: 2px;
+  animation: cur-ready-cue-pulse 2s ease-in-out infinite;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.cur-ready-cue:hover,
+.cur-ready-cue:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.cur-ready-cue:active {
+  transform: translateY(0);
+}
+
+@keyframes cur-ready-cue-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
 }
 
 /* Inline cost chips on unlock/upgrade cards. Smaller + denser than the
@@ -1391,24 +1466,15 @@ main h1 {
   opacity: 0.78;
 }
 
-/* Affordable cards: stronger border + a pulsing halo so the eye lands on
-   them across a busy panel. Combined with the READY badge, the saturated
-   button fill, and the per-chip progress bars all topped out, "you can
-   buy this right now" reads from across the screen. */
+/* Affordable cards: a quiet border bump + brighter button — no halo
+   pulse, since the card itself is often below the fold. The "you can buy
+   something now" job is handled above the fold by a viewport-anchored
+   cue; here we just need the card to look unmistakably actionable once
+   the player scrolls to it. */
 .unlock.affordable,
 .upgrade.affordable {
   border-color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
-  animation: card-affordable 1.8s ease-in-out infinite;
-}
-
-@keyframes card-affordable {
-  0%, 100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--chip-color) 22%, transparent);
-  }
+  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
 }
 
 .unlock.affordable .unlock-btn,
@@ -1416,49 +1482,34 @@ main h1 {
   border-color: var(--chip-color);
   border-width: 1.5px;
   color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 22%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 18%, transparent);
   font-weight: 600;
-  letter-spacing: 0.08em;
 }
 
 .unlock.affordable .unlock-btn:hover,
 .upgrade.affordable .upgrade-btn:hover {
-  background: color-mix(in srgb, var(--chip-color) 32%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 28%, transparent);
   color: var(--text-h);
 }
 
-/* READY badge: pushed to the right side of the header row via
-   margin-left:auto, with a flickering pulse and a triangle pointing at
-   the button below. The badge is small enough to fit on a single-line
-   header but vivid enough that it's the first thing the eye lands on. */
+/* Small "ready" tag — static, no flicker. It's a confirmation in place
+   once the player has scrolled to the card, not an attention magnet. */
 .card-ready {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-family: var(--mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.16em;
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
   font-weight: 700;
   text-transform: uppercase;
-  padding: 3px 8px;
+  padding: 2px 6px;
   border-radius: 4px;
-  background: var(--chip-color);
-  color: #fff;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
-  animation: card-ready-flicker 1.2s ease-in-out infinite;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 60%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 16%, transparent);
+  color: var(--chip-color);
   flex: none;
-}
-
-@keyframes card-ready-flicker {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--chip-color) 50%, transparent);
-  }
-  50% {
-    transform: scale(1.06);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--chip-color) 30%, transparent);
-  }
 }
 
 /* "need N more X" hint — single inline line under the cost chips that
