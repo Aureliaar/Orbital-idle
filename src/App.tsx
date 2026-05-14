@@ -4,12 +4,10 @@ import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { BodyId } from './bodies'
 import {
-  CHORD_ORBITS,
-  CHORD_STAGGER_S,
-  type ChordOrbitId,
-  I_ORBIT,
-  playChord,
-  V_ORBIT,
+  type ChordId,
+  type MoonId,
+  MOONS,
+  playTone,
 } from './chord'
 import { HarvestStage } from './HarvestStage'
 import {
@@ -142,18 +140,14 @@ const noteYieldCost = (id: BodyId, lvl: number): CurrencyPurse => ({
 
 // --- Für Elise stage ----------------------------------------------------
 
-// Visual color of each chord moon. The i moon (Am) inherits the A tonic's
-// blue; the V moon (E major) takes E's gold. Center planet is also A.
-const CHORD_COLORS: Record<ChordOrbitId, string> = {
-  [I_ORBIT.id]: PAD_COLORS.A,
-  [V_ORBIT.id]: PAD_COLORS.E,
+// Color per chord identity. The i moons (Am) inherit the A tonic's blue;
+// the V moons (E major) take E's gold. The center planet is also A.
+const CHORD_COLORS: Record<ChordId, string> = {
+  i: PAD_COLORS.A,
+  V: PAD_COLORS.E,
 }
-const CHORD_LABELS: Record<ChordOrbitId, string> = {
-  [I_ORBIT.id]: 'i',
-  [V_ORBIT.id]: 'V',
-}
-// Brief enlarge-and-fade applied to a moon for FIRE_FLASH_MS after its
-// chord fires, so the eye catches the synchronization with the audio.
+// Brief enlarge-and-fade applied to a moon for FIRE_FLASH_MS after it
+// fires, so the eye catches the synchronization with the audio.
 const FIRE_FLASH_MS = 380
 
 const formatCurrency = (v: number): string => {
@@ -261,11 +255,11 @@ function App() {
     })
   }, [])
 
-  // Per-orbit phase tracker: stores last-frame phase to detect wraps.
-  const phaseRef = useRef<Map<ChordOrbitId, number>>(new Map())
-  // performance.now() of the most recent fire per orbit, for the
-  // enlarge-and-fade flash on the moon when its chord plays.
-  const fireFlashRef = useRef<Map<ChordOrbitId, number>>(new Map())
+  // Per-moon phase tracker: stores last-frame phase to detect wraps.
+  const phaseRef = useRef<Map<MoonId, number>>(new Map())
+  // performance.now() of the most recent fire per moon, for the
+  // enlarge-and-fade flash when it crosses perihelion.
+  const fireFlashRef = useRef<Map<MoonId, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
@@ -300,25 +294,25 @@ function App() {
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
       const tonicColor = PAD_COLORS.A
 
-      const positions = CHORD_ORBITS.map((orbit) => {
-        const phase = ((t / orbit.period) + orbit.phase) % 1
+      const positions = MOONS.map((moon) => {
+        const phase = ((t / moon.period) + moon.phase) % 1
         const angle = phase * 2 * Math.PI
-        return { orbit, phase, angle }
+        return { moon, phase, angle }
       })
 
-      // Strike loop: each chord-orbit fires its chord on perihelion
+      // Strike loop: each moon fires its single tone on perihelion
       // crossing (phase wrap from near-1 back to 0).
       const a = audioRef.current
       const phases = phaseRef.current
       const audioReady = !!a && a.ctx.state === 'running' && tabRef.current === 'orbits'
-      for (const { orbit, phase } of positions) {
-        const last = phases.get(orbit.id)
-        phases.set(orbit.id, phase)
+      for (const { moon, phase } of positions) {
+        const last = phases.get(moon.id)
+        phases.set(moon.id, phase)
         if (last === undefined) continue
         if (phase >= last) continue
         if (!audioReady) continue
-        playChord(a!, orbit.chord, { staggerS: CHORD_STAGGER_S })
-        fireFlashRef.current.set(orbit.id, now)
+        playTone(a!, moon.pitch)
+        fireFlashRef.current.set(moon.id, now)
       }
 
       // --- Render ---
@@ -349,29 +343,30 @@ function App() {
       ctx.textBaseline = 'middle'
       ctx.fillText('A', cx, cy)
 
-      // Two chord moons.
-      for (const { orbit, angle } of positions) {
+      // Six moons.
+      for (const { moon, angle } of positions) {
         const mx = cx + Math.cos(angle) * orbitR
         const my = cy + Math.sin(angle) * orbitR
-        const flashStart = fireFlashRef.current.get(orbit.id) ?? -Infinity
+        const flashStart = fireFlashRef.current.get(moon.id) ?? -Infinity
         const flash = Math.max(0, 1 - (now - flashStart) / FIRE_FLASH_MS)
-        const r = 10 + flash * 8
+        const r = 9 + flash * 7
+        const color = CHORD_COLORS[moon.chordId]
 
         if (flash > 0) {
-          ctx.fillStyle = CHORD_COLORS[orbit.id]
-          ctx.globalAlpha = 0.25 * flash
+          ctx.fillStyle = color
+          ctx.globalAlpha = 0.22 * flash
           ctx.beginPath()
           ctx.arc(mx, my, r + 8, 0, 2 * Math.PI)
           ctx.fill()
           ctx.globalAlpha = 1
         }
-        ctx.fillStyle = CHORD_COLORS[orbit.id]
+        ctx.fillStyle = color
         ctx.beginPath()
         ctx.arc(mx, my, r, 0, 2 * Math.PI)
         ctx.fill()
         ctx.fillStyle = '#fff'
-        ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif'
-        ctx.fillText(CHORD_LABELS[orbit.id], mx, my)
+        ctx.font = 'bold 9px ui-sans-serif, system-ui, sans-serif'
+        ctx.fillText(moon.pitchLabel, mx, my)
       }
       // Restore default text alignment so subsequent draws don't inherit.
       ctx.fillStyle = textH
@@ -385,9 +380,12 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
+  // Clear the per-moon phase tracker. With staggered moons we can't use
+  // a "prime to 0.999" trick to force an immediate fire — that would
+  // fire every moon at once. The next frame will set fresh `last`
+  // values and subsequent frames detect real wraps.
   const primePhases = useCallback(() => {
     phaseRef.current.clear()
-    for (const orbit of CHORD_ORBITS) phaseRef.current.set(orbit.id, 0.999)
   }, [])
 
   useEffect(() => {
@@ -609,7 +607,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Für Elise · A tonic · the i and V chord moons fire as they cross perihelion'
+          ? 'Für Elise · A tonic · six moons share an orbit, each fires one note at perihelion'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
@@ -703,7 +701,7 @@ function App() {
         <canvas
           ref={canvasRef}
           className="orbit"
-          aria-label="A tonic with i and V chord moons"
+          aria-label="A tonic with six chord-note moons"
         />
       </section>
       {tab === 'harvest' && (

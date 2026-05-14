@@ -1,93 +1,62 @@
-// A Chord is a named bundle of pitches that fires as a unit (block or
-// arpeggiated). It owns the chord tones and the playback shape; an
-// orbit decides *when* it fires (not in this module yet — wired in
-// later stages). The audio path here is a sibling to HarvestStage's
-// `playPluck`: same pluck shape, no coincidence-boost concept.
+// Each note of Für Elise's left hand is a separate moon orbiting the A
+// tonic. Six moons share one orbit at 60° apart; each fires its single
+// tone when it crosses the perihelion marker. The arpeggio is *spatial*
+// — six bodies, six audible events per phrase, no internal scheduling.
 //
-// Note for naming: in code we call this object `Chord` to avoid
-// colliding with the existing `resonator` UI in HarvestStage.tsx.
-// Conceptually this is what "resonators have to be chords" refers to.
+// Conceptually the i and V chords still exist as groupings (a moon's
+// `chordId` tells you which chord it belongs to), but the playable
+// unit is now the single tone, not the chord.
 
 import type { AudioGraph } from './audio'
 import { defaultAmp, harmonicSeries } from './harmonics'
 
-export type Pitch = number // Hz
+export type ChordId = 'i' | 'V'
 
-export type Arpeggiation = 'block' | 'low-mid-high'
+export type MoonId = string
 
-export type ChordId = string
-
-export type Chord = {
-  id: ChordId
-  // Chord tones in low → high order. `low-mid-high` arpeggiation
-  // fires them in that sequence; `block` fires them simultaneously.
-  tones: readonly Pitch[]
-  arpeggiation: Arpeggiation
-  // Per-chord gain multiplier on top of the base pluck envelope.
-  gain?: number
+export type Moon = {
+  id: MoonId
+  pitch: number // Hz
+  pitchLabel: string
+  chordId: ChordId
+  period: number
+  phase: number
 }
 
-// Standard equal-temperament frequencies (A4 = 440 Hz) for the
-// Für Elise A-minor accompaniment.
+// Equal-temperament frequencies (A4 = 440 Hz).
 const A2 = 110.0
 const E2 = 82.41
 const E3 = 164.81
 const A3 = 220.0
 const G_SHARP_3 = 207.65
 
-// i = A minor (tonic), V = E major (dominant). E3 is the shared
-// pivot tone — present in both chords, the consonant link that
-// makes V → i resolve smoothly.
-export const CHORD_I: Chord = {
-  id: 'i',
-  tones: [A2, E3, A3],
-  arpeggiation: 'low-mid-high',
-}
-
-export const CHORD_V: Chord = {
-  id: 'V',
-  tones: [E2, E3, G_SHARP_3],
-  arpeggiation: 'low-mid-high',
-}
-
-export const CHORDS: readonly Chord[] = [CHORD_I, CHORD_V]
-
-// --- Chord orbits ------------------------------------------------------
-//
-// Two moons share an orbit around the A tonic at π phase offset.
-// Whichever moon is at perihelion (phase = 0, drawn at 3 o'clock) is
-// the one that fires its chord this measure. Period = 2 measures, so
-// the i ↔ V alternation is one synodic-style swap per measure.
-
+// 2 measures of 3/8 at ~90 BPM. One phrase = 6 notes = one full
+// revolution; each moon's perihelion crossing is one note.
 export const PHRASE_PERIOD_S = 4
 
-export type ChordOrbitId = string
+// Notes in firing-time order: A2, E3, A3 (i) then E2, E3, G#3 (V).
+// E3 appears in both chords as physically distinct moons — same pitch,
+// two bodies at different orbital positions.
+const SCORE: ReadonlyArray<{ pitch: number; label: string; chord: ChordId }> = [
+  { pitch: A2,        label: 'A2',  chord: 'i' },
+  { pitch: E3,        label: 'E3',  chord: 'i' },
+  { pitch: A3,        label: 'A3',  chord: 'i' },
+  { pitch: E2,        label: 'E2',  chord: 'V' },
+  { pitch: E3,        label: 'E3',  chord: 'V' },
+  { pitch: G_SHARP_3, label: 'G#3', chord: 'V' },
+]
 
-export type ChordOrbit = {
-  id: ChordOrbitId
-  period: number
-  phase: number
-  chord: Chord
-}
-
-export const I_ORBIT: ChordOrbit = {
-  id: 'orbit-i',
+// Strike convention: a moon fires when its phase wraps 1 → 0. To make
+// moon i cross perihelion at t = i * (period / N), its starting phase
+// offset must be (N − i) mod N divided by N.
+export const MOONS: readonly Moon[] = SCORE.map((m, i) => ({
+  id: `moon-${i}`,
+  pitch: m.pitch,
+  pitchLabel: m.label,
+  chordId: m.chord,
   period: PHRASE_PERIOD_S,
-  phase: 0,
-  chord: CHORD_I,
-}
-
-export const V_ORBIT: ChordOrbit = {
-  id: 'orbit-V',
-  period: PHRASE_PERIOD_S,
-  phase: 0.5,
-  chord: CHORD_V,
-}
-
-export const CHORD_ORBITS: readonly ChordOrbit[] = [I_ORBIT, V_ORBIT]
-
-// One measure (= phrase period / 2) divided into 3 eighth notes.
-export const CHORD_STAGGER_S = PHRASE_PERIOD_S / 2 / 3
+  phase: ((SCORE.length - i) % SCORE.length) / SCORE.length,
+}))
 
 // --- Audio synthesis ----------------------------------------------------
 
@@ -95,12 +64,13 @@ const HARMONIC_COUNT = 6
 const RING_DURATION_S = 1.5
 const PLUCK_GAIN = 0.18
 
-function playTone(audio: AudioGraph, fundamental: Pitch, when: number, gain: number): void {
+export function playTone(audio: AudioGraph, fundamental: number, when?: number): void {
   const { ctx, filter } = audio
+  const start = when ?? ctx.currentTime
   const env = ctx.createGain()
-  env.gain.setValueAtTime(0, when)
-  env.gain.linearRampToValueAtTime(PLUCK_GAIN * gain, when + 0.005)
-  env.gain.exponentialRampToValueAtTime(0.0001, when + RING_DURATION_S)
+  env.gain.setValueAtTime(0, start)
+  env.gain.linearRampToValueAtTime(PLUCK_GAIN, start + 0.005)
+  env.gain.exponentialRampToValueAtTime(0.0001, start + RING_DURATION_S)
   env.connect(filter)
 
   const partials = harmonicSeries(fundamental, HARMONIC_COUNT, defaultAmp)
@@ -111,13 +81,13 @@ function playTone(audio: AudioGraph, fundamental: Pitch, when: number, gain: num
     const g = ctx.createGain()
     g.gain.value = h.amp
     o.connect(g).connect(env)
-    o.start(when)
-    o.stop(when + RING_DURATION_S + 0.05)
+    o.start(start)
+    o.stop(start + RING_DURATION_S + 0.05)
   }
 
-  // env.disconnect() after the ring finishes — schedule on wall clock,
-  // since `when` is in audio-context time.
-  const releaseInS = Math.max(0, when - ctx.currentTime) + RING_DURATION_S + 0.2
+  // env.disconnect() once the ring finishes — scheduled on wall clock,
+  // since `start` is in audio-context time.
+  const releaseInS = Math.max(0, start - ctx.currentTime) + RING_DURATION_S + 0.2
   window.setTimeout(() => {
     try {
       env.disconnect()
@@ -125,26 +95,4 @@ function playTone(audio: AudioGraph, fundamental: Pitch, when: number, gain: num
       // already disconnected
     }
   }, releaseInS * 1000)
-}
-
-export type PlayChordOpts = {
-  // Audio-context time to start the chord. Defaults to ctx.currentTime.
-  when?: number
-  // Seconds between successive tones for `low-mid-high` arpeggiation.
-  staggerS?: number
-}
-
-export function playChord(audio: AudioGraph, chord: Chord, opts?: PlayChordOpts): void {
-  const t0 = opts?.when ?? audio.ctx.currentTime
-  const stagger = opts?.staggerS ?? 0.4
-  const gain = chord.gain ?? 1
-
-  if (chord.arpeggiation === 'block') {
-    for (const tone of chord.tones) playTone(audio, tone, t0, gain)
-    return
-  }
-
-  for (let i = 0; i < chord.tones.length; i++) {
-    playTone(audio, chord.tones[i], t0 + i * stagger, gain)
-  }
 }
