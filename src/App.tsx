@@ -6,7 +6,6 @@ import type { BodyId } from './bodies'
 import {
   MEASURE_PERIOD_S,
   MOON_COUNT,
-  MOON_OFFSETS,
   MOON_VOICE_INDEX,
   playTone,
   PROGRESSION,
@@ -143,7 +142,7 @@ const noteYieldCost = (id: BodyId, lvl: number): CurrencyPurse => ({
 // --- Prelude stage ------------------------------------------------------
 
 // Color per voice index. Bass at the bottom is the existing C-pad red;
-// the four upper voices gradient through to gold at the top.
+// the four upper voices gradient through to teal at the top.
 const VOICE_COLORS: readonly string[] = [
   PAD_COLORS.C, // bass — red
   PAD_COLORS.D, // tenor — orange
@@ -151,11 +150,37 @@ const VOICE_COLORS: readonly string[] = [
   PAD_COLORS.F, // alto-high — green
   PAD_COLORS.G, // soprano — teal
 ]
-const TONIC_COLOR = PAD_COLORS.C
+// Tonic planets are colored by their chord root, picking from the
+// existing diatonic palette where possible.
+const ROOT_COLOR_FOR_CHORD: Record<string, string> = {
+  C: PAD_COLORS.C,
+  Dm: PAD_COLORS.D,
+  'G7/B': PAD_COLORS.G,
+  Am: PAD_COLORS.A,
+  'D7/F#': PAD_COLORS.D,
+  G: PAD_COLORS.G,
+  'C/E': PAD_COLORS.C,
+}
+const tonicColorOf = (chordName: string) => ROOT_COLOR_FOR_CHORD[chordName] ?? PAD_COLORS.C
 
-// Brief enlarge-and-fade applied to a moon for FIRE_FLASH_MS after it
-// fires, so the eye catches the synchronization with the audio.
+// Brief enlarge-and-fade after a fire event.
 const FIRE_FLASH_MS = 380
+
+// The chaser train: CHASER_COUNT bodies orbit the tonic ring at the
+// PROCESSION_PERIOD. They span PROCESSION_WIDTH degrees at the leading
+// edge, just under one tonic-spacing — so each tonic-pass gets all 8
+// voices in sequence with a 16th-note breath between measures.
+const PROCESSION_PERIOD_S = MEASURE_PERIOD_S * PROGRESSION.length // full progression per revolution
+const CHASER_COUNT = MOON_COUNT
+const TONIC_SPACING_DEG = 360 / PROGRESSION.length
+// Span = 7/8 of the tonic spacing → 7 inter-chaser gaps of (spacing/8),
+// plus a (spacing/8) gap before the next tonic gets struck.
+const PROCESSION_WIDTH_DEG = TONIC_SPACING_DEG * (CHASER_COUNT - 1) / CHASER_COUNT
+// Per-chaser angular offset from the leader (negative = behind it).
+const CHASER_OFFSET_DEG: readonly number[] = Array.from(
+  { length: CHASER_COUNT },
+  (_, k) => -k * (PROCESSION_WIDTH_DEG / (CHASER_COUNT - 1)),
+)
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -262,14 +287,13 @@ function App() {
     })
   }, [])
 
-  // Phase tracker — 'orbit' for the master phase that decides chord
-  // turnover, 'moon-i' for each moon's wrap detection.
-  const phaseRef = useRef<Map<string, number>>(new Map())
-  // performance.now() of the most recent fire per moon index, for the
-  // enlarge-and-fade flash on perihelion crossing.
-  const fireFlashRef = useRef<Map<number, number>>(new Map())
-  // Index into PROGRESSION — advances once per orbital revolution.
-  const chordIdxRef = useRef<number>(0)
+  // Phase tracker — per-chaser sector (which tonic the chaser is
+  // currently in). Sector change → fire that tonic's chord voice.
+  const chaserSectorRef = useRef<Map<number, number>>(new Map())
+  // performance.now() of the most recent fire per (tonicIdx, voiceIdx).
+  const tonicFlashRef = useRef<Map<number, number>>(new Map())
+  // performance.now() of the most recent fire per chaser, for trail glow.
+  const chaserFlashRef = useRef<Map<number, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
@@ -297,107 +321,130 @@ function App() {
       const cx = cssW / 2
       const cy = cssH / 2
       const minDim = Math.min(cssW, cssH)
-      const orbitR = minDim * 0.36
+      // The tonic ring sits near the canvas edge; chasers ride a slightly
+      // inner orbit so the two layers read distinctly.
+      const tonicR = minDim * 0.42
+      const chaserR = minDim * 0.36
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
 
-      // Master orbit phase — one revolution per measure.
-      const orbitPhase = (t / MEASURE_PERIOD_S) % 1
+      // Leading chaser angle. Spin is +1 (clockwise on canvas).
+      const leadDeg = ((t / PROCESSION_PERIOD_S) * 360) % 360
 
-      // Advance the chord pointer when the orbit completes a revolution.
-      const phases = phaseRef.current
-      const lastOrbit = phases.get('orbit')
-      phases.set('orbit', orbitPhase)
-      if (lastOrbit !== undefined && orbitPhase < lastOrbit) {
-        chordIdxRef.current = (chordIdxRef.current + 1) % PROGRESSION.length
-      }
-      const chord = PROGRESSION[chordIdxRef.current]
-
-      // Each moon's individual phase + render position.
-      const moons = Array.from({ length: MOON_COUNT }, (_, i) => {
-        const phase = (orbitPhase + MOON_OFFSETS[i]) % 1
-        const angle = phase * 2 * Math.PI
-        const voiceIdx = MOON_VOICE_INDEX[i]
+      // Compute each chaser's angle and current sector (= which tonic
+      // it's nearest, with sector boundaries at tonic angles).
+      const chasers = Array.from({ length: CHASER_COUNT }, (_, k) => {
+        let deg = (leadDeg + CHASER_OFFSET_DEG[k]) % 360
+        if (deg < 0) deg += 360
+        const angle = (deg / 360) * 2 * Math.PI
+        // Sector S spans angles [S * spacing, (S+1) * spacing). A chaser
+        // entering sector S has just crossed the tonic at S * spacing.
+        const sector = Math.floor(deg / TONIC_SPACING_DEG) % PROGRESSION.length
         return {
-          i,
-          phase,
+          k,
+          deg,
           angle,
-          x: cx + Math.cos(angle) * orbitR,
-          y: cy + Math.sin(angle) * orbitR,
-          pitch: chord.tones[voiceIdx],
-          color: VOICE_COLORS[voiceIdx],
+          sector,
+          voiceIdx: MOON_VOICE_INDEX[k],
+          x: cx + Math.cos(angle) * chaserR,
+          y: cy + Math.sin(angle) * chaserR,
         }
       })
 
-      // Strike loop: each moon fires when its phase wraps 1 → 0.
+      // Strike loop: each chaser fires when its sector changes (= just
+      // crossed a tonic boundary going forward).
       const a = audioRef.current
       const audioReady = !!a && a.ctx.state === 'running' && tabRef.current === 'orbits'
-      for (const m of moons) {
-        const key = `moon-${m.i}`
-        const last = phases.get(key)
-        phases.set(key, m.phase)
+      for (const c of chasers) {
+        const last = chaserSectorRef.current.get(c.k)
+        chaserSectorRef.current.set(c.k, c.sector)
         if (last === undefined) continue
-        if (m.phase >= last) continue
-        if (!audioReady) continue
-        playTone(a!, m.pitch)
-        fireFlashRef.current.set(m.i, now)
+        if (last === c.sector) continue
+        // Forward sector change: the chaser just crossed the tonic at
+        // c.sector. Fire that chord's voice for this chaser.
+        const tonic = PROGRESSION[c.sector]
+        const pitch = tonic.tones[c.voiceIdx]
+        if (audioReady) playTone(a!, pitch)
+        tonicFlashRef.current.set(c.sector, now)
+        chaserFlashRef.current.set(c.k, now)
       }
 
       // --- Render ---
 
-      // Orbital ring.
+      // Tonic ring (faint).
       ctx.strokeStyle = border
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.arc(cx, cy, orbitR, 0, 2 * Math.PI)
+      ctx.arc(cx, cy, tonicR, 0, 2 * Math.PI)
       ctx.stroke()
 
-      // Perihelion marker at 3 o'clock — every moon fires here.
-      ctx.strokeStyle = textM
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(cx + orbitR - 8, cy)
-      ctx.lineTo(cx + orbitR + 8, cy)
-      ctx.stroke()
-
-      // Center C planet, with the current chord label beneath.
-      ctx.fillStyle = TONIC_COLOR
-      ctx.beginPath()
-      ctx.arc(cx, cy, 14, 0, 2 * Math.PI)
-      ctx.fill()
-      ctx.fillStyle = '#fff'
-      ctx.font = 'bold 12px ui-sans-serif, system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText('C', cx, cy)
-
-      ctx.fillStyle = textH
-      ctx.font = 'bold 15px ui-sans-serif, system-ui, sans-serif'
-      ctx.fillText(chord.name, cx, cy + 32)
-
-      // Eight moons.
-      for (const m of moons) {
-        const flashStart = fireFlashRef.current.get(m.i) ?? -Infinity
+      // Tonic planets — one per chord in the progression.
+      for (let n = 0; n < PROGRESSION.length; n++) {
+        const tonic = PROGRESSION[n]
+        const ang = (n / PROGRESSION.length) * 2 * Math.PI
+        const tx = cx + Math.cos(ang) * tonicR
+        const ty = cy + Math.sin(ang) * tonicR
+        const flashStart = tonicFlashRef.current.get(n) ?? -Infinity
         const flash = Math.max(0, 1 - (now - flashStart) / FIRE_FLASH_MS)
-        const r = 9 + flash * 7
-
+        const baseR = 13
+        const r = baseR + flash * 6
+        const color = tonicColorOf(tonic.name)
         if (flash > 0) {
-          ctx.fillStyle = m.color
+          ctx.fillStyle = color
           ctx.globalAlpha = 0.22 * flash
           ctx.beginPath()
-          ctx.arc(m.x, m.y, r + 8, 0, 2 * Math.PI)
+          ctx.arc(tx, ty, r + 8, 0, 2 * Math.PI)
           ctx.fill()
           ctx.globalAlpha = 1
         }
-        ctx.fillStyle = m.color
+        ctx.fillStyle = color
         ctx.beginPath()
-        ctx.arc(m.x, m.y, r, 0, 2 * Math.PI)
+        ctx.arc(tx, ty, r, 0, 2 * Math.PI)
+        ctx.fill()
+
+        // Chord label, pushed outward from the planet center.
+        const labelDist = tonicR + baseR + 12
+        const lx = cx + Math.cos(ang) * labelDist
+        const ly = cy + Math.sin(ang) * labelDist
+        ctx.fillStyle = textH
+        ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(tonic.name, lx, ly)
+      }
+
+      // Chasers — small bodies trailing the leader, voice-colored.
+      for (const c of chasers) {
+        const flashStart = chaserFlashRef.current.get(c.k) ?? -Infinity
+        const flash = Math.max(0, 1 - (now - flashStart) / FIRE_FLASH_MS)
+        const baseR = 5
+        const r = baseR + flash * 4
+        const color = VOICE_COLORS[c.voiceIdx]
+        if (flash > 0) {
+          ctx.fillStyle = color
+          ctx.globalAlpha = 0.3 * flash
+          ctx.beginPath()
+          ctx.arc(c.x, c.y, r + 6, 0, 2 * Math.PI)
+          ctx.fill()
+          ctx.globalAlpha = 1
+        }
+        ctx.fillStyle = color
+        ctx.beginPath()
+        ctx.arc(c.x, c.y, r, 0, 2 * Math.PI)
         ctx.fill()
       }
-      // Restore default text styles for subsequent draws.
+
+      // Center: small "C" key marker, just for orientation.
+      ctx.fillStyle = textM
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('C major', cx, cy)
+
+      // Restore defaults so subsequent draws don't inherit.
       ctx.fillStyle = textH
       ctx.textAlign = 'start'
       ctx.textBaseline = 'alphabetic'
@@ -409,12 +456,12 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // Reset the orbit + chord pointer when audio comes online so the
-  // progression always starts at C and the moons get a fresh phase
-  // baseline (no spurious wrap detection on the first frame).
+  // Reset chaser sector + flash state when audio comes online. First
+  // frame after this primes `last` per chaser without firing.
   const primePhases = useCallback(() => {
-    phaseRef.current.clear()
-    chordIdxRef.current = 0
+    chaserSectorRef.current.clear()
+    tonicFlashRef.current.clear()
+    chaserFlashRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -636,7 +683,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Bach · Prelude in C · eight moons trace the broken chord; the chord swaps each revolution'
+          ? 'Bach · Prelude in C · eight tonics ring the orbit; a chaser train sweeps through them'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
@@ -730,7 +777,7 @@ function App() {
         <canvas
           ref={canvasRef}
           className="orbit"
-          aria-label="C tonic with eight moons tracing the Prelude's broken chord"
+          aria-label="Eight chord tonics on a ring with a chaser train sweeping through them"
         />
       </section>
       {tab === 'harvest' && (
