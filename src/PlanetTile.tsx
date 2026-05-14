@@ -7,12 +7,24 @@ const LONG_PRESS_MS = 420
 type Props = {
   body: Body
   armed: boolean
-  flying: boolean
-  onLaunch: () => void
+  active: boolean
+  locked: boolean
+  unlockHint?: string
+  affordable: boolean
+  onSelect: () => void
   onLongPress: () => void
 }
 
-export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props) {
+export function PlanetTile({
+  body,
+  armed,
+  active,
+  locked,
+  unlockHint,
+  affordable,
+  onSelect,
+  onLongPress,
+}: Props) {
   const timerRef = useRef<number | null>(null)
   const longFiredRef = useRef(false)
   const [pressing, setPressing] = useState(false)
@@ -43,9 +55,7 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
     const wasShort = timerRef.current !== null
     clearTimer()
     setPressing(false)
-    if (wasShort && !longFiredRef.current && armed && !flying) {
-      onLaunch()
-    }
+    if (wasShort && !longFiredRef.current) onSelect()
   }
 
   const onPointerCancel = () => {
@@ -57,10 +67,18 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
     'tile',
     armed ? 'armed' : '',
     pressing ? 'pressing' : '',
-    flying ? 'flying' : '',
+    active ? 'active' : '',
+    locked ? 'locked' : '',
+    locked && !affordable ? 'unaffordable' : '',
   ]
     .filter(Boolean)
     .join(' ')
+
+  const label = locked
+    ? `Unlock ${body.name}'s resonator${unlockHint ? ` (${unlockHint})` : ''}`
+    : active
+      ? `${body.name} resonator (active). Long-press for orbital stats.`
+      : `Open ${body.name}'s resonator. Long-press for orbital stats.`
 
   return (
     <button
@@ -71,7 +89,8 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
       onPointerCancel={onPointerCancel}
       onPointerLeave={onPointerCancel}
       onContextMenu={(e) => e.preventDefault()}
-      aria-label={`Launch to ${body.name}. Long-press to upgrade.`}
+      aria-label={label}
+      aria-pressed={active}
     >
       <span className="tile-progress" aria-hidden="true" />
       <span className="tile-row">
@@ -81,7 +100,15 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
       <span className="tile-name">{body.name}</span>
       <span className="tile-interval">{body.intervalLabel}</span>
       <span className="tile-status" aria-hidden="true">
-        {flying ? 'in transit' : armed ? 'window open' : '—'}
+        {locked
+          ? unlockHint
+            ? `unlock · ${unlockHint}`
+            : 'locked'
+          : active
+            ? 'active'
+            : armed
+              ? 'window open'
+              : 'open resonator'}
       </span>
     </button>
   )

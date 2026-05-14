@@ -35,14 +35,14 @@ main h1 {
   margin: 4px 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
-  width: min(720px, 96vw);
+  width: min(820px, 96vw);
 }
 
 @media (max-width: 720px) {
   .tiles {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -82,8 +82,29 @@ main h1 {
   color: var(--accent);
 }
 
-.tile.flying {
+.tile.active {
+  border-color: var(--text-h);
+  background: color-mix(in srgb, var(--accent-bg) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--text-h);
+}
+
+.tile.active:hover {
+  border-color: var(--text-h);
+}
+
+.tile.locked {
+  opacity: 0.66;
   border-style: dashed;
+}
+
+.tile.locked.unaffordable {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.tile.locked .tile-note,
+.tile.locked .tile-name {
+  color: var(--text);
 }
 
 .tile-progress {
@@ -440,6 +461,80 @@ main h1 {
 .tab.on {
   background: var(--accent-bg);
   color: var(--accent);
+}
+
+/* --- Planet bar --- */
+
+.planet-bar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  max-width: min(720px, 96vw);
+}
+
+.planet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, opacity 120ms ease;
+}
+
+.planet-chip:hover {
+  color: var(--text-h);
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+}
+
+.planet-chip.on {
+  background: color-mix(in srgb, var(--chip-color) 22%, transparent);
+  color: var(--chip-color);
+  font-weight: 600;
+}
+
+.planet-chip.locked {
+  opacity: 0.7;
+}
+
+.planet-chip.locked.unaffordable {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.planet-chip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chip-color);
+  flex-shrink: 0;
+}
+
+.planet-chip.locked .planet-chip-swatch {
+  background: transparent;
+  border: 1px dashed var(--chip-color);
+}
+
+.planet-chip-id {
+  letter-spacing: 0.05em;
+}
+
+.planet-chip-cost {
+  font-size: 0.7rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 
 /* --- Currency readout --- */
