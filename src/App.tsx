@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AMSynth, Context, FMSynth, Panner, PluckSynth, setContext } from 'tone'
 import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
-import type { Body, BodyId, Orbit, OrbitId } from './bodies'
-import { BODIES, EARTH, ORBITS, PHRASE_ORBIT, TARGETS } from './bodies'
-import { CHORD_I, CHORD_V, playChord } from './chord'
+import type { BodyId } from './bodies'
+import {
+  CHORD_ORBITS,
+  CHORD_STAGGER_S,
+  type ChordOrbitId,
+  I_ORBIT,
+  playChord,
+  V_ORBIT,
+} from './chord'
 import { HarvestStage } from './HarvestStage'
 import {
   addToPurse,
@@ -28,8 +33,6 @@ import type {
   FreqCurrency,
   NoteCurrency,
 } from './harvest-config'
-import { PlanetTile } from './PlanetTile'
-import { UpgradePanel } from './UpgradePanel'
 
 type Tab = 'orbits' | 'harvest'
 
@@ -137,87 +140,21 @@ const noteYieldCost = (id: BodyId, lvl: number): CurrencyPurse => ({
   [FIFTH_NEXT[id]]: Math.round(NOTE_YIELD_BASE * COST_STEP ** lvl),
 })
 
-const PROBE_DURATION_S = 1.4
-const HALO_PROXIMITY = 0.93
+// --- Für Elise stage ----------------------------------------------------
 
-// Earth → C3 (130.81 Hz). Each body's just-intonation period ratio places it
-// on the diatonic scale starting from C, so the visual note labels match the
-// audible pitches: D3, E3, F3, G3, A3, B3.
-const EARTH_HZ = 261.63 / 2
-
-const VOICE_FLOOR_GAIN = 0.002
-const VOICE_PEAK_GAIN = 0.16
-const SWELL_ATTACK_TAU = 1.8
-const SWELL_DECAY_TAU = 3.5
-const SWELL_RELEASE_TAU = 0.55
-const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
-const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
-
-const STRIKE_FLOOR_VELOCITY = 0.08
-const EARTH_VELOCITY = 0.55
-const STRIKE_DURATION = '8n'
-
-const TIMBRES = ['pluck', 'piano', 'synth'] as const
-type Timbre = (typeof TIMBRES)[number]
-const TIMBRE_LABELS: Record<Timbre, string> = {
-  pluck: 'Pluck',
-  piano: 'Piano',
-  synth: 'Synth',
+// Visual color of each chord moon. The i moon (Am) inherits the A tonic's
+// blue; the V moon (E major) takes E's gold. Center planet is also A.
+const CHORD_COLORS: Record<ChordOrbitId, string> = {
+  [I_ORBIT.id]: PAD_COLORS.A,
+  [V_ORBIT.id]: PAD_COLORS.E,
 }
-
-type Probe = { startMs: number }
-type ArmedMap = Partial<Record<BodyId, boolean>>
-type VoiceState = { held: number; releasing: boolean; armed: boolean }
-type ToneVoice = {
-  synth: PluckSynth | FMSynth | AMSynth
-  panner: Panner
-  freq: number
+const CHORD_LABELS: Record<ChordOrbitId, string> = {
+  [I_ORBIT.id]: 'i',
+  [V_ORBIT.id]: 'V',
 }
-type OrbitAudio = {
-  graph: AudioGraph
-  voices: Map<BodyId, ToneVoice>
-  earth: ToneVoice
-  timbre: Timbre
-}
-
-const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
-  if (timbre === 'pluck') {
-    return new PluckSynth({ attackNoise: 1, dampening: 4000, resonance: 0.92, release: 1 })
-  }
-  if (timbre === 'piano') {
-    return new FMSynth({
-      harmonicity: 2,
-      modulationIndex: 6,
-      oscillator: { type: 'sine' },
-      envelope: { attack: 0.003, decay: 1.6, sustain: 0, release: 0.6 },
-      modulation: { type: 'sine' },
-      modulationEnvelope: { attack: 0.003, decay: 0.5, sustain: 0, release: 0.4 },
-    })
-  }
-  return new AMSynth({
-    harmonicity: 2.5,
-    oscillator: { type: 'triangle' },
-    envelope: { attack: 0.01, decay: 0.8, sustain: 0.05, release: 0.6 },
-    modulation: { type: 'square' },
-    modulationEnvelope: { attack: 0.05, decay: 0.4, sustain: 0, release: 0.3 },
-  })
-}
-
-// Sorted inside→out by orbital period so visual radii grow outward.
-const RENDER_ORBITS: Orbit[] = [...ORBITS].sort((a, b) => a.period - b.period)
-const PLANET_BY_ID: Map<BodyId, Body> = new Map(BODIES.map((b) => [b.id, b]))
-
-// Did the orbit's phase cross point `at` ∈ [0, 1) this frame?
-// `last` and `phase` are both in [0, 1); a wrap (last > phase) means
-// the phase passed through 1 → 0 between frames.
-const crossed = (last: number, phase: number, at: number): boolean => {
-  if (phase >= last) return last < at && at <= phase
-  return at > last || at <= phase
-}
-
-// Stagger between arpeggio tones: one measure (= phrase period / 2)
-// divided into 3 eighth notes.
-const CHORD_STAGGER_S = PHRASE_ORBIT.period / 2 / 3
+// Brief enlarge-and-fade applied to a moon for FIRE_FLASH_MS after its
+// chord fires, so the eye catches the synchronization with the audio.
+const FIRE_FLASH_MS = 380
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -276,17 +213,11 @@ function CostChips({ cost }: { cost: CurrencyPurse }) {
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const probesRef = useRef<Map<BodyId, Probe>>(new Map())
-  const armedRef = useRef<ArmedMap>({})
-  const [armed, setArmed] = useState<ArmedMap>({})
-  const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
-  const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
   const [audioOn, setAudioOn] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
     return !!(window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
   })
-  const [timbre, setTimbre] = useState<Timbre>('piano')
-  const audioRef = useRef<OrbitAudio | null>(null)
+  const audioRef = useRef<AudioGraph | null>(null)
   const [tab, setTab] = useState<Tab>('harvest')
   const [currencies, setCurrencies] = useState<CurrencyPurse>({})
   const [seenCurrencies, setSeenCurrencies] = useState<Set<CurrencyKey>>(() => new Set(['C']))
@@ -330,11 +261,11 @@ function App() {
     })
   }, [])
 
-  const swellsRef = useRef<Map<BodyId, VoiceState>>(
-    new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
-  )
-  const launchRequestRef = useRef<BodyId | null>(null)
-  const phaseRef = useRef<Map<OrbitId, number>>(new Map())
+  // Per-orbit phase tracker: stores last-frame phase to detect wraps.
+  const phaseRef = useRef<Map<ChordOrbitId, number>>(new Map())
+  // performance.now() of the most recent fire per orbit, for the
+  // enlarge-and-fade flash on the moon when its chord plays.
+  const fireFlashRef = useRef<Map<ChordOrbitId, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
@@ -345,12 +276,9 @@ function App() {
 
     let raf = 0
     const start = performance.now()
-    let lastNow = start
 
     const draw = (now: number) => {
       const t = (now - start) / 1000
-      const dt = Math.min(0.1, (now - lastNow) / 1000)
-      lastNow = now
 
       const dpr = window.devicePixelRatio || 1
       const cssW = canvas.clientWidth
@@ -364,198 +292,91 @@ function App() {
 
       const cx = cssW / 2
       const cy = cssH / 2
-      const rMax = Math.min(cssW, cssH) * 0.44
-      const rMin = rMax * 0.22
+      const orbitR = Math.min(cssW, cssH) * 0.32
 
       const styles = getComputedStyle(document.documentElement)
       const border = styles.getPropertyValue('--border').trim() || '#e5e4e7'
-      const accent = styles.getPropertyValue('--accent').trim() || '#aa3bff'
-      const accentBg = styles.getPropertyValue('--accent-bg').trim() || 'rgba(170,59,255,0.1)'
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
+      const tonicColor = PAD_COLORS.A
 
-      const earthOrbit = RENDER_ORBITS.find((o) => o.planetId === EARTH.id)!
-      const earthAngle = ((t / earthOrbit.period) + earthOrbit.phase) * 2 * Math.PI
-
-      const positions = RENDER_ORBITS.map((orbit, i) => {
-        const planet = PLANET_BY_ID.get(orbit.planetId)!
-        const r = rMin + (rMax - rMin) * (i / (RENDER_ORBITS.length - 1))
-        const angle = ((t / orbit.period) + orbit.phase) * 2 * Math.PI
-        let delta = Math.abs(((earthAngle - angle) % (2 * Math.PI)))
-        if (delta > Math.PI) delta = 2 * Math.PI - delta
-        return { orbit, planet, angle, r, delta }
+      const positions = CHORD_ORBITS.map((orbit) => {
+        const phase = ((t / orbit.period) + orbit.phase) % 1
+        const angle = phase * 2 * Math.PI
+        return { orbit, phase, angle }
       })
-      const earthPos = positions.find((p) => p.planet.id === EARTH.id)!
 
-      const swells = swellsRef.current
-      const launchedId = launchRequestRef.current
-      if (launchedId) {
-        launchRequestRef.current = null
-        const s = swells.get(launchedId)
-        if (s && s.held > VOICE_FLOOR_GAIN + 0.001) {
-          s.releasing = true
-          s.armed = false
-        }
-      }
-
-      for (const { planet, delta } of positions) {
-        if (planet.id === EARTH.id) continue
-        const s = swells.get(planet.id)
-        if (!s) continue
-        const proximity = 1 - delta / Math.PI
-        const target = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * Math.pow(proximity, 3)
-        if (s.releasing) {
-          s.held += (VOICE_FLOOR_GAIN - s.held) * (1 - Math.exp(-dt / SWELL_RELEASE_TAU))
-          if (s.held < VOICE_FLOOR_GAIN + 0.0005) {
-            s.held = VOICE_FLOOR_GAIN
-            s.releasing = false
-          }
-        } else if (s.armed && target > s.held) {
-          s.held += (target - s.held) * (1 - Math.exp(-dt / SWELL_ATTACK_TAU))
-        } else if (target < s.held) {
-          s.held += (target - s.held) * (1 - Math.exp(-dt / SWELL_DECAY_TAU))
-        }
-        if (!s.armed && target < REARM_TARGET) s.armed = true
-      }
-
+      // Strike loop: each chord-orbit fires its chord on perihelion
+      // crossing (phase wrap from near-1 back to 0).
       const a = audioRef.current
       const phases = phaseRef.current
-      const audioReady = !!a && a.graph.ctx.state === 'running' && tabRef.current === 'orbits'
-      const strike = (voice: ToneVoice, velocity: number) => {
-        if (!audioReady) return
-        const v = Math.max(0, Math.min(1, velocity))
-        if (v < 0.001) return
-        voice.synth.triggerAttackRelease(voice.freq, STRIKE_DURATION, undefined, v)
-      }
-      for (const { orbit, planet } of positions) {
-        const phase = ((t / orbit.period) + orbit.phase) % 1
+      const audioReady = !!a && a.ctx.state === 'running' && tabRef.current === 'orbits'
+      for (const { orbit, phase } of positions) {
         const last = phases.get(orbit.id)
         phases.set(orbit.id, phase)
         if (last === undefined) continue
-        const wrapped = phase < last
-        if (!wrapped) continue
+        if (phase >= last) continue
         if (!audioReady) continue
-        if (planet.id === EARTH.id) {
-          strike(a!.earth, EARTH_VELOCITY)
-        } else {
-          const voice = a!.voices.get(planet.id)
-          if (!voice) continue
-          const s = swells.get(planet.id)
-          const norm = s
-            ? (s.held - VOICE_FLOOR_GAIN) / (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN)
-            : 0
-          const velocity = STRIKE_FLOOR_VELOCITY + Math.pow(Math.max(0, norm), 0.7) * (1 - STRIKE_FLOOR_VELOCITY)
-          strike(voice, velocity)
-        }
+        playChord(a!, orbit.chord, { staggerS: CHORD_STAGGER_S })
+        fireFlashRef.current.set(orbit.id, now)
       }
 
-      // Phrase orbit drives the i ↔ V chord progression.
-      const phrasePhase = ((t / PHRASE_ORBIT.period) + PHRASE_ORBIT.phase) % 1
-      const lastPhrasePhase = phases.get(PHRASE_ORBIT.id)
-      phases.set(PHRASE_ORBIT.id, phrasePhase)
-      if (lastPhrasePhase !== undefined && audioReady) {
-        if (crossed(lastPhrasePhase, phrasePhase, 0)) {
-          playChord(a!.graph, CHORD_I, { staggerS: CHORD_STAGGER_S })
-        }
-        if (crossed(lastPhrasePhase, phrasePhase, 0.5)) {
-          playChord(a!.graph, CHORD_V, { staggerS: CHORD_STAGGER_S })
-        }
-      }
+      // --- Render ---
 
-      const nextArmed: ArmedMap = {}
-      for (const body of TARGETS) {
-        const s = swells.get(body.id)
-        nextArmed[body.id] = !!(s && !s.releasing && s.held > LAUNCH_ARM_GAIN)
-      }
-
+      // Orbital ring.
       ctx.strokeStyle = border
       ctx.lineWidth = 1
-      for (const { r } of positions) {
-        ctx.beginPath()
-        ctx.arc(cx, cy, r, 0, 2 * Math.PI)
-        ctx.stroke()
-      }
-
-      ctx.fillStyle = accentBg
-      let anyAligned = false
-      for (const { planet, angle, r, delta } of positions) {
-        if (planet.id === EARTH.id) continue
-        const proximity = 1 - delta / Math.PI
-        if (proximity > HALO_PROXIMITY) {
-          const px = cx + Math.cos(angle) * r
-          const py = cy + Math.sin(angle) * r
-          ctx.beginPath()
-          ctx.arc(px, py, 13, 0, 2 * Math.PI)
-          ctx.fill()
-          anyAligned = true
-        }
-      }
-      if (anyAligned) {
-        const ex = cx + Math.cos(earthPos.angle) * earthPos.r
-        const ey = cy + Math.sin(earthPos.angle) * earthPos.r
-        ctx.beginPath()
-        ctx.arc(ex, ey, 14, 0, 2 * Math.PI)
-        ctx.fill()
-      }
-
-      ctx.fillStyle = textM
       ctx.beginPath()
-      ctx.arc(cx, cy, 2, 0, 2 * Math.PI)
+      ctx.arc(cx, cy, orbitR, 0, 2 * Math.PI)
+      ctx.stroke()
+
+      // Perihelion marker (3 o'clock) — the fire pointer.
+      ctx.strokeStyle = textM
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(cx + orbitR - 8, cy)
+      ctx.lineTo(cx + orbitR + 8, cy)
+      ctx.stroke()
+
+      // Center planet (A tonic).
+      ctx.fillStyle = tonicColor
+      ctx.beginPath()
+      ctx.arc(cx, cy, 14, 0, 2 * Math.PI)
       ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 12px ui-sans-serif, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('A', cx, cy)
 
-      for (const { planet, angle, r } of positions) {
-        const px = cx + Math.cos(angle) * r
-        const py = cy + Math.sin(angle) * r
-        const isEarth = planet.id === EARTH.id
-        ctx.fillStyle = isEarth ? textH : nextArmed[planet.id] ? accent : textM
-        ctx.beginPath()
-        ctx.arc(px, py, isEarth ? 6 : 5, 0, 2 * Math.PI)
-        ctx.fill()
-      }
+      // Two chord moons.
+      for (const { orbit, angle } of positions) {
+        const mx = cx + Math.cos(angle) * orbitR
+        const my = cy + Math.sin(angle) * orbitR
+        const flashStart = fireFlashRef.current.get(orbit.id) ?? -Infinity
+        const flash = Math.max(0, 1 - (now - flashStart) / FIRE_FLASH_MS)
+        const r = 10 + flash * 8
 
-      const toRemove: BodyId[] = []
-      probesRef.current.forEach((probe, id) => {
-        const u = (now - probe.startMs) / 1000 / PROBE_DURATION_S
-        if (u >= 1) {
-          toRemove.push(id)
-          return
+        if (flash > 0) {
+          ctx.fillStyle = CHORD_COLORS[orbit.id]
+          ctx.globalAlpha = 0.25 * flash
+          ctx.beginPath()
+          ctx.arc(mx, my, r + 8, 0, 2 * Math.PI)
+          ctx.fill()
+          ctx.globalAlpha = 1
         }
-        const target = positions.find((p) => p.planet.id === id)
-        if (!target) return
-        const r = earthPos.r + (target.r - earthPos.r) * u
-        let delta = (target.angle - earthAngle) % (2 * Math.PI)
-        if (delta > Math.PI) delta -= 2 * Math.PI
-        if (delta < -Math.PI) delta += 2 * Math.PI
-        const angle = earthAngle + delta * u
-        const px = cx + Math.cos(angle) * r
-        const py = cy + Math.sin(angle) * r
-        ctx.fillStyle = accent
+        ctx.fillStyle = CHORD_COLORS[orbit.id]
         ctx.beginPath()
-        ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
+        ctx.arc(mx, my, r, 0, 2 * Math.PI)
         ctx.fill()
-      })
-      if (toRemove.length) {
-        for (const id of toRemove) probesRef.current.delete(id)
-        setFlying((prev) => {
-          if (toRemove.every((id) => !prev.has(id))) return prev
-          const next = new Set(prev)
-          for (const id of toRemove) next.delete(id)
-          return next
-        })
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif'
+        ctx.fillText(CHORD_LABELS[orbit.id], mx, my)
       }
-
-      const prevArmed = armedRef.current
-      let changed = false
-      for (const body of TARGETS) {
-        if ((prevArmed[body.id] ?? false) !== (nextArmed[body.id] ?? false)) {
-          changed = true
-          break
-        }
-      }
-      if (changed) {
-        armedRef.current = nextArmed
-        setArmed(nextArmed)
-      }
+      // Restore default text alignment so subsequent draws don't inherit.
+      ctx.fillStyle = textH
+      ctx.textAlign = 'start'
+      ctx.textBaseline = 'alphabetic'
 
       raf = requestAnimationFrame(draw)
     }
@@ -564,63 +385,16 @@ function App() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  const stopAudio = useCallback((audio: OrbitAudio) => {
-    const { graph, voices, earth } = audio
-    teardownAudioGraph(graph, [])
-    window.setTimeout(() => {
-      for (const v of voices.values()) {
-        v.synth.dispose()
-        v.panner.dispose()
-      }
-      earth.synth.dispose()
-      earth.panner.dispose()
-    }, 400)
-  }, [])
-
-  const buildAudio = useCallback((nextTimbre: Timbre): OrbitAudio | null => {
-    const graph = createAudioGraph({ lowpassHz: 1500, fadeInS: 0.6 })
-    if (!graph) return null
-
-    setContext(new Context({ context: graph.ctx }))
-
-    const buildVoice = (hz: number, pan: number): ToneVoice => {
-      const synth = buildSynth(nextTimbre)
-      const panner = new Panner(pan)
-      synth.connect(panner)
-      panner.connect(graph.master as unknown as AudioNode)
-      return { synth, panner, freq: hz }
-    }
-
-    const earth = buildVoice(EARTH_HZ, 0)
-    const voices = new Map<BodyId, ToneVoice>()
-    TARGETS.forEach((body, i) => {
-      const pan = -0.4 + (i / Math.max(1, TARGETS.length - 1)) * 0.8
-      const hz = EARTH_HZ * body.ratio
-      voices.set(body.id, buildVoice(hz, pan))
-    })
-
-    return { graph, voices, earth, timbre: nextTimbre }
-  }, [])
-
-  const handleSoundToggle = useCallback(() => {
-    setAudioOn((on) => !on)
-  }, [])
-
-  const handleTimbreChange = useCallback((next: Timbre) => {
-    setTimbre(next)
-  }, [])
-
   const primePhases = useCallback(() => {
     phaseRef.current.clear()
-    for (const orbit of ORBITS) phaseRef.current.set(orbit.id, 0.999)
-    phaseRef.current.set(PHRASE_ORBIT.id, 0.999)
+    for (const orbit of CHORD_ORBITS) phaseRef.current.set(orbit.id, 0.999)
   }, [])
 
   useEffect(() => {
     if (!audioOn) return
-    const audio = buildAudio(timbre)
-    if (!audio) return
-    audioRef.current = audio
+    const graph = createAudioGraph({ lowpassHz: 1500, fadeInS: 0.6 })
+    if (!graph) return
+    audioRef.current = graph
     primePhases()
 
     let unlock: (() => void) | null = null
@@ -630,10 +404,10 @@ function App() {
       window.removeEventListener('keydown', unlock)
       unlock = null
     }
-    if (audio.graph.ctx.state !== 'running') {
+    if (graph.ctx.state !== 'running') {
       unlock = () => {
         removeUnlock()
-        audio.graph.ctx
+        graph.ctx
           .resume()
           .then(() => {
             primePhases()
@@ -646,29 +420,28 @@ function App() {
 
     return () => {
       removeUnlock()
-      if (audioRef.current === audio) {
+      if (audioRef.current === graph) {
         audioRef.current = null
-        stopAudio(audio)
+        teardownAudioGraph(graph, [])
       }
     }
-  }, [audioOn, timbre, buildAudio, stopAudio, primePhases])
+  }, [audioOn, primePhases])
 
   useEffect(() => {
     tabRef.current = tab
-    const audio = audioRef.current
-    if (!audio) return
-    const master = audio.graph.master
-    const ctx = audio.graph.ctx
+    const graph = audioRef.current
+    if (!graph) return
+    const master = graph.master
+    const ctx = graph.ctx
     const t0 = ctx.currentTime
     master.gain.cancelScheduledValues(t0)
     master.gain.setValueAtTime(master.gain.value, t0)
     if (tab === 'orbits') {
       master.gain.linearRampToValueAtTime(1, t0 + 0.2)
-      primePhases()
     } else {
       master.gain.linearRampToValueAtTime(0, t0 + 0.05)
     }
-  }, [tab, primePhases])
+  }, [tab])
 
   const idleRate = useMemo(
     () => computeIdleRate(slots, autoPluckSlots, noteYieldLvls, YIELD_STEP),
@@ -780,6 +553,10 @@ function App() {
     [noteYieldLvls, spendIfAffordable],
   )
 
+  const handleSoundToggle = useCallback(() => {
+    setAudioOn((on) => !on)
+  }, [])
+
   const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 2)
   const nextSlotIdx = slotCount + 1
   const slotGate = SLOT_UNLOCK_GATES[nextSlotIdx]
@@ -796,18 +573,6 @@ function App() {
   const autoPluckSlotsToOffer = autoPluckGate
     ? Array.from({ length: slotCount }, (_, i) => i).filter((i) => !autoPluckSlots.has(i))
     : []
-
-  const onLaunch = useCallback((body: Body) => {
-    if (!armedRef.current[body.id]) return
-    if (probesRef.current.has(body.id)) return
-    probesRef.current.set(body.id, { startMs: performance.now() })
-    launchRequestRef.current = body.id
-    setFlying((prev) => {
-      const next = new Set(prev)
-      next.add(body.id)
-      return next
-    })
-  }, [])
 
   const visibleNoteCurrencies = NOTE_CURRENCIES.filter(
     (k) => seenCurrencies.has(k) || (currencies[k] ?? 0) > 0,
@@ -844,7 +609,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
+          ? 'Für Elise · A tonic · the i and V chord moons fire as they cross perihelion'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
@@ -920,7 +685,7 @@ function App() {
             className={`sound${audioOn ? ' on' : ''}`}
             onClick={handleSoundToggle}
             aria-pressed={audioOn}
-            aria-label={audioOn ? 'Mute drone' : 'Play drone'}
+            aria-label={audioOn ? 'Mute' : 'Play'}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor" />
@@ -934,42 +699,12 @@ function App() {
               )}
             </svg>
           </button>
-          <div className="timbres" role="radiogroup" aria-label="Timbre">
-            {TIMBRES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="radio"
-                aria-checked={timbre === t}
-                className={`timbre${timbre === t ? ' on' : ''}`}
-                onClick={() => handleTimbreChange(t)}
-              >
-                {TIMBRE_LABELS[t]}
-              </button>
-            ))}
-          </div>
         </div>
         <canvas
           ref={canvasRef}
           className="orbit"
-          aria-label="Seven bodies on a diatonic wheel"
+          aria-label="A tonic with i and V chord moons"
         />
-        <ul className="tiles" role="list">
-          {TARGETS.map((body) => (
-            <li key={body.id}>
-              <PlanetTile
-                body={body}
-                armed={armed[body.id] ?? false}
-                flying={flying.has(body.id)}
-                onLaunch={() => onLaunch(body)}
-                onLongPress={() => setUpgradeFor(body)}
-              />
-            </li>
-          ))}
-        </ul>
-        {upgradeFor && (
-          <UpgradePanel body={upgradeFor} onClose={() => setUpgradeFor(null)} />
-        )}
       </section>
       {tab === 'harvest' && (
         <>

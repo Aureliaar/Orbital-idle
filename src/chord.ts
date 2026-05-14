@@ -52,6 +52,43 @@ export const CHORD_V: Chord = {
 
 export const CHORDS: readonly Chord[] = [CHORD_I, CHORD_V]
 
+// --- Chord orbits ------------------------------------------------------
+//
+// Two moons share an orbit around the A tonic at π phase offset.
+// Whichever moon is at perihelion (phase = 0, drawn at 3 o'clock) is
+// the one that fires its chord this measure. Period = 2 measures, so
+// the i ↔ V alternation is one synodic-style swap per measure.
+
+export const PHRASE_PERIOD_S = 4
+
+export type ChordOrbitId = string
+
+export type ChordOrbit = {
+  id: ChordOrbitId
+  period: number
+  phase: number
+  chord: Chord
+}
+
+export const I_ORBIT: ChordOrbit = {
+  id: 'orbit-i',
+  period: PHRASE_PERIOD_S,
+  phase: 0,
+  chord: CHORD_I,
+}
+
+export const V_ORBIT: ChordOrbit = {
+  id: 'orbit-V',
+  period: PHRASE_PERIOD_S,
+  phase: 0.5,
+  chord: CHORD_V,
+}
+
+export const CHORD_ORBITS: readonly ChordOrbit[] = [I_ORBIT, V_ORBIT]
+
+// One measure (= phrase period / 2) divided into 3 eighth notes.
+export const CHORD_STAGGER_S = PHRASE_PERIOD_S / 2 / 3
+
 // --- Audio synthesis ----------------------------------------------------
 
 const HARMONIC_COUNT = 6
