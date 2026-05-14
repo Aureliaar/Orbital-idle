@@ -33,8 +33,10 @@ export const HARMONIC_COUNT = 6
 export const RING_DURATION_S = 1.5
 export const RING_DURATION_MS = RING_DURATION_S * 1000
 
-// Coincidence detection tolerance — 0.5% ≈ 8.6 cents.
-export const COINCIDENCE_TOL = 0.005
+// Coincidence detection tolerance — 1% ≈ 17 cents. Comfortably wider
+// than the largest 12-TET-vs-just gap (~14 cents on the M3) so partial
+// pairs that "want" to coincide actually do under equal temperament.
+export const COINCIDENCE_TOL = 0.01
 
 // Up to three assignable slots — start with one and unlock the rest.
 export const INITIAL_SLOT_COUNT = 1
