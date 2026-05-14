@@ -67,6 +67,17 @@ export const ORBITS: Orbit[] = BODIES.map((b) => ({
   phase: HOME_ORBIT_PHASE[b.id],
 }))
 
+// Phrase orbit: a clock that gates the i ↔ V chord progression for
+// Für Elise's left hand. Period = 2 measures at ~60 BPM. At perihelion
+// (phase = 0) fires the i chord; at apohelion (phase = 0.5) fires V.
+// Anchored conceptually to the A planet (the tonic of the piece) but
+// does not strike any planet voice itself.
+export const PHRASE_ORBIT = {
+  id: 'phrase',
+  period: 4,
+  phase: 0,
+} as const
+
 const RATIO_LABELS: Record<string, string> = {
   '1': '1:1',
   '1.125': '9:8',

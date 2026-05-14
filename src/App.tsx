@@ -4,7 +4,8 @@ import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId, Orbit, OrbitId } from './bodies'
-import { BODIES, EARTH, ORBITS, TARGETS } from './bodies'
+import { BODIES, EARTH, ORBITS, PHRASE_ORBIT, TARGETS } from './bodies'
+import { CHORD_I, CHORD_V, playChord } from './chord'
 import { HarvestStage } from './HarvestStage'
 import {
   addToPurse,
@@ -205,6 +206,18 @@ const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
 // Sorted inside→out by orbital period so visual radii grow outward.
 const RENDER_ORBITS: Orbit[] = [...ORBITS].sort((a, b) => a.period - b.period)
 const PLANET_BY_ID: Map<BodyId, Body> = new Map(BODIES.map((b) => [b.id, b]))
+
+// Did the orbit's phase cross point `at` ∈ [0, 1) this frame?
+// `last` and `phase` are both in [0, 1); a wrap (last > phase) means
+// the phase passed through 1 → 0 between frames.
+const crossed = (last: number, phase: number, at: number): boolean => {
+  if (phase >= last) return last < at && at <= phase
+  return at > last || at <= phase
+}
+
+// Stagger between arpeggio tones: one measure (= phrase period / 2)
+// divided into 3 eighth notes.
+const CHORD_STAGGER_S = PHRASE_ORBIT.period / 2 / 3
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -436,6 +449,19 @@ function App() {
         }
       }
 
+      // Phrase orbit drives the i ↔ V chord progression.
+      const phrasePhase = ((t / PHRASE_ORBIT.period) + PHRASE_ORBIT.phase) % 1
+      const lastPhrasePhase = phases.get(PHRASE_ORBIT.id)
+      phases.set(PHRASE_ORBIT.id, phrasePhase)
+      if (lastPhrasePhase !== undefined && audioReady) {
+        if (crossed(lastPhrasePhase, phrasePhase, 0)) {
+          playChord(a!.graph, CHORD_I, { staggerS: CHORD_STAGGER_S })
+        }
+        if (crossed(lastPhrasePhase, phrasePhase, 0.5)) {
+          playChord(a!.graph, CHORD_V, { staggerS: CHORD_STAGGER_S })
+        }
+      }
+
       const nextArmed: ArmedMap = {}
       for (const body of TARGETS) {
         const s = swells.get(body.id)
@@ -587,6 +613,7 @@ function App() {
   const primePhases = useCallback(() => {
     phaseRef.current.clear()
     for (const orbit of ORBITS) phaseRef.current.set(orbit.id, 0.999)
+    phaseRef.current.set(PHRASE_ORBIT.id, 0.999)
   }, [])
 
   useEffect(() => {
