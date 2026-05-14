@@ -884,8 +884,9 @@ function App() {
 
   // Yield candidate: among every unlocked note's next-level upgrade, surface
   // only the most promising — affordable first, then closest to affordable,
-  // then cheapest by level. Hides the bulk of "you'll get here eventually"
-  // cards that would otherwise crowd the panel.
+  // then cheapest by level. Gated until the diatonic circle is complete so
+  // the early game stays focused on unlocks/slots/auto-plucks — once you've
+  // closed C→G→D→A→E→B→F→C, yield becomes the "now deepen each note" layer.
   type YieldOption = {
     id: BodyId
     lvl: number
@@ -895,15 +896,18 @@ function App() {
     progress: number
     affordable: boolean
   }
-  const yieldOptions: YieldOption[] = unlockedIds.map((id) => {
-    const lvl = noteYieldLvls[id] ?? 0
-    const cost = noteYieldCost(id, lvl)
-    const costNote = FIFTH_NEXT[id]
-    const gateUnlocked = unlockedIds.includes(costNote)
-    const progress = gateUnlocked ? costProgress(currencies, cost) : 0
-    const affordable = gateUnlocked && canAffordPurse(currencies, cost)
-    return { id, lvl, cost, costNote, gateUnlocked, progress, affordable }
-  })
+  const yieldPanelUnlocked = UNLOCK_LADDER.every((id) => unlockedIds.includes(id))
+  const yieldOptions: YieldOption[] = yieldPanelUnlocked
+    ? unlockedIds.map((id) => {
+        const lvl = noteYieldLvls[id] ?? 0
+        const cost = noteYieldCost(id, lvl)
+        const costNote = FIFTH_NEXT[id]
+        const gateUnlocked = unlockedIds.includes(costNote)
+        const progress = gateUnlocked ? costProgress(currencies, cost) : 0
+        const affordable = gateUnlocked && canAffordPurse(currencies, cost)
+        return { id, lvl, cost, costNote, gateUnlocked, progress, affordable }
+      })
+    : []
   const visibleYieldOption: YieldOption | undefined = [...yieldOptions]
     .sort((a, b) => {
       if (a.affordable !== b.affordable) return a.affordable ? -1 : 1
