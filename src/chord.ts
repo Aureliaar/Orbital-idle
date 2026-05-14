@@ -12,6 +12,7 @@
 // figure: bass → u0 → u1 → u2 → u3 → u2 → u1 → u0.
 
 import type { AudioGraph } from './audio'
+import type { BodyId } from './bodies'
 import { defaultAmp, harmonicSeries } from './harmonics'
 
 export type Pitch = number // Hz
@@ -23,26 +24,30 @@ const C4 = 261.63, D4 = 293.66, E4 = 329.63, F4 = 349.23, FS4 = 369.99, G4 = 392
 
 export type Voicing = {
   name: string
+  // Chord root note — the diatonic-wheel planet this chord lives on.
+  root: BodyId
   // Five pitches in ascending order — bass at index 0, top at index 4.
   tones: readonly [Pitch, Pitch, Pitch, Pitch, Pitch]
 }
 
 const v = (
   name: string,
+  root: BodyId,
   tones: [Pitch, Pitch, Pitch, Pitch, Pitch],
-): Voicing => ({ name, tones })
+): Voicing => ({ name, root, tones })
 
-// First eight measures of the Prelude in C, simplified voicings. Each
-// chord is bass + tenor + a three-note upper triad covering the chord.
+// First eight measures of the Prelude in C, simplified voicings. Roots
+// fall on four of the seven diatonic planets: C, D, G, A — so the
+// progression criss-crosses the wheel rather than walking it.
 export const PROGRESSION: readonly Voicing[] = [
-  v('C',     [C2,  E3, G3, C4, E4]),
-  v('Dm',    [D2,  F3, A3, D4, F4]),
-  v('G7/B',  [B2,  F3, G3, B3, D4]),
-  v('C',     [C2,  E3, G3, C4, E4]),
-  v('Am',    [A2,  E3, A3, C4, E4]),
-  v('D7/F#', [FS2, A3, C4, D4, FS4]),
-  v('G',     [G2,  B3, D4, G4, B4]),
-  v('C/E',   [E2,  G3, C4, E4, G4]),
+  v('C',     'C', [C2,  E3, G3, C4, E4]),
+  v('Dm',    'D', [D2,  F3, A3, D4, F4]),
+  v('G7/B',  'G', [B2,  F3, G3, B3, D4]),
+  v('C',     'C', [C2,  E3, G3, C4, E4]),
+  v('Am',    'A', [A2,  E3, A3, C4, E4]),
+  v('D7/F#', 'D', [FS2, A3, C4, D4, FS4]),
+  v('G',     'G', [G2,  B3, D4, G4, B4]),
+  v('C/E',   'C', [E2,  G3, C4, E4, G4]),
 ]
 
 // Period for one revolution = one measure.
