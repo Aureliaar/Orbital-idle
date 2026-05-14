@@ -8,6 +8,7 @@ import {
   type MoonId,
   MOONS,
   playTone,
+  type Spin,
 } from './chord'
 import { HarvestStage } from './HarvestStage'
 import {
@@ -149,6 +150,19 @@ const CHORD_COLORS: Record<ChordId, string> = {
 // Brief enlarge-and-fade applied to a moon for FIRE_FLASH_MS after it
 // fires, so the eye catches the synchronization with the audio.
 const FIRE_FLASH_MS = 380
+
+// Did `fireAt` get crossed between `last` and `curr` in the direction
+// of `spin`? Both `last` and `curr` are in [0, 1).
+const crossed = (last: number, curr: number, fireAt: number, spin: Spin): boolean => {
+  if (spin > 0) {
+    if (curr >= last) return last < fireAt && fireAt <= curr
+    return fireAt > last || fireAt <= curr
+  }
+  if (curr <= last) return curr <= fireAt && fireAt < last
+  return fireAt < last || fireAt >= curr
+}
+
+const normPhase = (x: number) => ((x % 1) + 1) % 1
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -300,14 +314,14 @@ function App() {
       const tonicColor = PAD_COLORS.A
 
       const positions = MOONS.map((moon) => {
-        const phase = ((t / moon.period) + moon.phase) % 1
+        const phase = normPhase((moon.spin * t) / moon.period + moon.phase)
         const angle = phase * 2 * Math.PI
         const r = radiusOf(moon.chordId)
         return { moon, phase, angle, r }
       })
 
-      // Strike loop: each moon fires its single tone on perihelion
-      // crossing (phase wrap from near-1 back to 0).
+      // Strike loop: each moon fires when its phase crosses fireAt in
+      // its spin direction.
       const a = audioRef.current
       const phases = phaseRef.current
       const audioReady = !!a && a.ctx.state === 'running' && tabRef.current === 'orbits'
@@ -315,7 +329,7 @@ function App() {
         const last = phases.get(moon.id)
         phases.set(moon.id, phase)
         if (last === undefined) continue
-        if (phase >= last) continue
+        if (!crossed(last, phase, moon.fireAt, moon.spin)) continue
         if (!audioReady) continue
         playTone(a!, moon.pitch)
         fireFlashRef.current.set(moon.id, now)
@@ -332,13 +346,19 @@ function App() {
         ctx.stroke()
       }
 
-      // Perihelion markers (3 o'clock) — one tick per ring.
+      // Fire-point markers — i ring at 3 o'clock, V ring at 9 o'clock.
+      // Each tick is a short radial line crossing the ring at its fireAt.
       ctx.strokeStyle = textM
       ctx.lineWidth = 2
-      for (const r of [innerR, outerR]) {
+      for (const chord of ['i', 'V'] as const) {
+        const r = radiusOf(chord)
+        const fireAt = chord === 'i' ? 0 : 0.5
+        const ang = fireAt * 2 * Math.PI
+        const cosA = Math.cos(ang)
+        const sinA = Math.sin(ang)
         ctx.beginPath()
-        ctx.moveTo(cx + r - 7, cy)
-        ctx.lineTo(cx + r + 7, cy)
+        ctx.moveTo(cx + cosA * (r - 7), cy + sinA * (r - 7))
+        ctx.lineTo(cx + cosA * (r + 7), cy + sinA * (r + 7))
         ctx.stroke()
       }
 
@@ -617,7 +637,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Für Elise · A tonic · inner ring arpeggiates i, outer ring arpeggiates V'
+          ? 'Für Elise · inner i ring spins one way, outer V ring the other; they fire on opposite sides'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">

@@ -14,13 +14,21 @@ export type ChordId = 'i' | 'V'
 
 export type MoonId = string
 
+export type Spin = 1 | -1
+
 export type Moon = {
   id: MoonId
   pitch: number // Hz
   pitchLabel: string
   chordId: ChordId
   period: number
+  // Initial phase in [0, 1) at t = 0.
   phase: number
+  // Direction of rotation: +1 = phase increases over time (clockwise on
+  // canvas), -1 = phase decreases (counter-clockwise).
+  spin: Spin
+  // Phase value at which this moon fires. 0 = 3 o'clock, 0.5 = 9 o'clock.
+  fireAt: number
 }
 
 // Equal-temperament frequencies (A4 = 440 Hz).
@@ -46,17 +54,36 @@ const SCORE: ReadonlyArray<{ pitch: number; label: string; chord: ChordId }> = [
   { pitch: G_SHARP_3, label: 'G#3', chord: 'V' },
 ]
 
-// Strike convention: a moon fires when its phase wraps 1 → 0. To make
-// moon i cross perihelion at t = i * (period / N), its starting phase
-// offset must be (N − i) mod N divided by N.
-export const MOONS: readonly Moon[] = SCORE.map((m, i) => ({
-  id: `moon-${i}`,
-  pitch: m.pitch,
-  pitchLabel: m.label,
-  chordId: m.chord,
-  period: PHRASE_PERIOD_S,
-  phase: ((SCORE.length - i) % SCORE.length) / SCORE.length,
-}))
+// Ring config: i ring rotates clockwise and fires at 3 o'clock; V ring
+// rotates counter-clockwise and fires at 9 o'clock. Same audio timing,
+// mirror-symmetric visual.
+const RING: Record<ChordId, { spin: Spin; fireAt: number }> = {
+  i: { spin: 1, fireAt: 0 },
+  V: { spin: -1, fireAt: 0.5 },
+}
+
+// Given desired fire time, period, spin, and fire phase, solve for the
+// initial phase such that phase(t_fire) == fireAt:
+//   phase_t = ((spin * t / period) + initialPhase) mod 1
+//   ⇒ initialPhase = (fireAt − spin · t_fire / period) mod 1
+const norm = (x: number) => ((x % 1) + 1) % 1
+const phaseFor = (tFire: number, period: number, spin: Spin, fireAt: number) =>
+  norm(fireAt - (spin * tFire) / period)
+
+export const MOONS: readonly Moon[] = SCORE.map((m, i) => {
+  const tFire = (i * PHRASE_PERIOD_S) / SCORE.length
+  const { spin, fireAt } = RING[m.chord]
+  return {
+    id: `moon-${i}`,
+    pitch: m.pitch,
+    pitchLabel: m.label,
+    chordId: m.chord,
+    period: PHRASE_PERIOD_S,
+    phase: phaseFor(tFire, PHRASE_PERIOD_S, spin, fireAt),
+    spin,
+    fireAt,
+  }
+})
 
 // --- Audio synthesis ----------------------------------------------------
 
