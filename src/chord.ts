@@ -1,122 +1,69 @@
-// Each note of Für Elise's left hand is a separate moon orbiting the A
-// tonic. Six moons share one orbit at 60° apart; each fires its single
-// tone when it crosses the perihelion marker. The arpeggio is *spatial*
-// — six bodies, six audible events per phrase, no internal scheduling.
+// Now serving: Bach Prelude in C, BWV 846.
 //
-// Conceptually the i and V chords still exist as groupings (a moon's
-// `chordId` tells you which chord it belongs to), but the playable
-// unit is now the single tone, not the chord.
+// Every measure of the Prelude is the same fixed broken-chord pattern;
+// only the chord changes. We model it as one orbital ring with eight
+// moons evenly spaced, each moon assigned to a fixed VOICE (bass /
+// upper-1 / upper-2 / ...) in the current chord. One revolution = one
+// measure. Each revolution, the chord pointer advances to the next
+// entry in PROGRESSION.
+//
+// 5 pitches per voicing (bass + 4 upper voices). The 8 moons traverse
+// the voicing's pitches in an up-then-down pattern, mirroring Bach's
+// figure: bass → u0 → u1 → u2 → u3 → u2 → u1 → u0.
 
 import type { AudioGraph } from './audio'
 import { defaultAmp, harmonicSeries } from './harmonics'
 
-export type ChordId = 'i' | 'V'
+export type Pitch = number // Hz
 
-export type MoonId = string
+// Equal-temperament frequencies (A4 = 440).
+const C2 = 65.41, D2 = 73.42, E2 = 82.41, FS2 = 92.5, G2 = 98.0, A2 = 110.0, B2 = 123.47
+const E3 = 164.81, F3 = 174.61, G3 = 196.0, A3 = 220.0, B3 = 246.94
+const C4 = 261.63, D4 = 293.66, E4 = 329.63, F4 = 349.23, FS4 = 369.99, G4 = 392.0, B4 = 493.88
 
-export type Spin = 1 | -1
-
-export type Moon = {
-  id: MoonId
-  pitch: number // Hz
-  pitchLabel: string
-  chordId: ChordId
-  period: number
-  // Initial phase in [0, 1) at t = 0.
-  phase: number
-  // Direction of rotation: +1 = phase increases over time (clockwise on
-  // canvas), -1 = phase decreases (counter-clockwise).
-  spin: Spin
-  // Phase value at which this moon fires. 0 = 3 o'clock, 0.5 = 9 o'clock.
-  fireAt: number
+export type Voicing = {
+  name: string
+  // Five pitches in ascending order — bass at index 0, top at index 4.
+  tones: readonly [Pitch, Pitch, Pitch, Pitch, Pitch]
 }
 
-// Equal-temperament frequencies (A4 = 440 Hz).
-const A2 = 110.0
-const E2 = 82.41
-const E3 = 164.81
-const A3 = 220.0
-const G_SHARP_3 = 207.65
+const v = (
+  name: string,
+  tones: [Pitch, Pitch, Pitch, Pitch, Pitch],
+): Voicing => ({ name, tones })
 
-// 2 measures of 3/8 at ~90 BPM. One phrase = 6 notes = one full
-// revolution; each moon's perihelion crossing is one note.
-export const PHRASE_PERIOD_S = 4
-
-// Notes in firing-time order: A2, E3, A3 (i) then E2, E3, G#3 (V).
-// E3 appears in both chords as physically distinct moons — same pitch,
-// two bodies at different orbital positions.
-const SCORE: ReadonlyArray<{ pitch: number; label: string; chord: ChordId }> = [
-  { pitch: A2,        label: 'A2',  chord: 'i' },
-  { pitch: E3,        label: 'E3',  chord: 'i' },
-  { pitch: A3,        label: 'A3',  chord: 'i' },
-  { pitch: E2,        label: 'E2',  chord: 'V' },
-  { pitch: E3,        label: 'E3',  chord: 'V' },
-  { pitch: G_SHARP_3, label: 'G#3', chord: 'V' },
+// First eight measures of the Prelude in C, simplified voicings. Each
+// chord is bass + tenor + a three-note upper triad covering the chord.
+export const PROGRESSION: readonly Voicing[] = [
+  v('C',     [C2,  E3, G3, C4, E4]),
+  v('Dm',    [D2,  F3, A3, D4, F4]),
+  v('G7/B',  [B2,  F3, G3, B3, D4]),
+  v('C',     [C2,  E3, G3, C4, E4]),
+  v('Am',    [A2,  E3, A3, C4, E4]),
+  v('D7/F#', [FS2, A3, C4, D4, FS4]),
+  v('G',     [G2,  B3, D4, G4, B4]),
+  v('C/E',   [E2,  G3, C4, E4, G4]),
 ]
 
-// Ring config: i ring rotates clockwise and fires at 3 o'clock; V ring
-// rotates counter-clockwise and fires at 9 o'clock. Same audio timing,
-// mirror-symmetric visual.
-const RING: Record<ChordId, { spin: Spin; fireAt: number }> = {
-  i: { spin: 1, fireAt: 0 },
-  V: { spin: -1, fireAt: 0.5 },
-}
+// Period for one revolution = one measure.
+export const MEASURE_PERIOD_S = 2
 
-// Given desired fire time, period, spin, and fire phase, solve for the
-// initial phase such that phase(t_fire) == fireAt:
-//   phase_t = ((spin * t / period) + initialPhase) mod 1
-//   ⇒ initialPhase = (fireAt − spin · t_fire / period) mod 1
-const norm = (x: number) => ((x % 1) + 1) % 1
-const phaseFor = (tFire: number, period: number, spin: Spin, fireAt: number) =>
-  norm(fireAt - (spin * tFire) / period)
+// Eight moons per ring.
+export const MOON_COUNT = 8
 
-export const MOONS: readonly Moon[] = SCORE.map((m, i) => {
-  const tFire = (i * PHRASE_PERIOD_S) / SCORE.length
-  const { spin, fireAt } = RING[m.chord]
-  return {
-    id: `moon-${i}`,
-    pitch: m.pitch,
-    pitchLabel: m.label,
-    chordId: m.chord,
-    period: PHRASE_PERIOD_S,
-    phase: phaseFor(tFire, PHRASE_PERIOD_S, spin, fireAt),
-    spin,
-    fireAt,
-  }
-})
+// Voice index each moon plays — pattern is bass + up-down arpeggio of
+// the four upper voices.
+export const MOON_VOICE_INDEX: readonly number[] = [0, 1, 2, 3, 4, 3, 2, 1]
 
-// --- Melody: stylized Für Elise right hand ----------------------------
-//
-// The famous opening 9 sixteenth notes (E5–D#5–E5–D#5–E5–B4–D5–C5–A4)
-// plus 3 rests, evenly spaced around a comet's orbit. The comet shares
-// the LH phrase period (4 s), so each step is 1/3 s — about a sixteenth
-// note at this tempo, twice as fast as the LH moons.
+// Initial phase offset so moon i crosses perihelion at t = i · (period / N).
+// Strike convention: a moon fires when phase wraps from near-1 to 0,
+// so initialPhase = (1 − i/N) mod 1.
+export const MOON_OFFSETS: readonly number[] = Array.from(
+  { length: MOON_COUNT },
+  (_, i) => ((MOON_COUNT - i) % MOON_COUNT) / MOON_COUNT,
+)
 
-const A4 = 440.0
-const B4 = 493.88
-const C5 = 523.25
-const D5 = 587.33
-const DS5 = 622.25
-const E5 = 659.25
-
-export const REST = 0
-
-export type MelodyStop = { pitch: number; label: string }
-
-export const MELODY: readonly MelodyStop[] = [
-  { pitch: E5,   label: 'E5'  },
-  { pitch: DS5,  label: 'D#5' },
-  { pitch: E5,   label: 'E5'  },
-  { pitch: DS5,  label: 'D#5' },
-  { pitch: E5,   label: 'E5'  },
-  { pitch: B4,   label: 'B4'  },
-  { pitch: D5,   label: 'D5'  },
-  { pitch: C5,   label: 'C5'  },
-  { pitch: A4,   label: 'A4'  },
-  { pitch: REST, label: '·'   },
-  { pitch: REST, label: '·'   },
-  { pitch: REST, label: '·'   },
-]
+// --- Audio synthesis ----------------------------------------------------
 
 const HARMONIC_COUNT = 6
 const DEFAULT_RING_S = 1.5
@@ -151,8 +98,6 @@ export function playTone(audio: AudioGraph, fundamental: number, opts?: PlayTone
     o.stop(start + ringS + 0.05)
   }
 
-  // env.disconnect() once the ring finishes — scheduled on wall clock,
-  // since `start` is in audio-context time.
   const releaseInS = Math.max(0, start - ctx.currentTime) + ringS + 0.2
   window.setTimeout(() => {
     try {
