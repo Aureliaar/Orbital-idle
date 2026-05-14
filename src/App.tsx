@@ -238,12 +238,11 @@ const makeInitialResonator = (): ResonatorState => {
   }
 }
 
-// Cost to open a new planet's resonator. Paid in `id`'s own note currency
-// from the *currently active* planet's purse — so the player must have
-// unlocked that note in some prior resonator to mint enough to pay. Flat
-// cost keeps the unlock affordance legible (one number, one currency).
-const PLANET_UNLOCK_BASE = 60
-const planetUnlockCost = (id: BodyId): CurrencyPurse => ({ [id]: PLANET_UNLOCK_BASE })
+// Cost gate for opening a new planet's resonator is currently disabled —
+// debug mode lets the player tap any planet from the wheel and get a
+// fresh resonator immediately. The flat-cost shape (N units of `id`'s own
+// note currency, paid from the active purse) lives in git history for
+// when we want to re-enable it.
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -911,48 +910,19 @@ function App() {
     [noteYieldLvls, currencies, updateActive],
   )
 
-  // Switch active planet, or kick off the unlock flow if the player taps a
-  // planet they haven't bought a resonator for yet. Unlock is paid out of
-  // the *active* planet's purse — since the cost is in the target planet's
-  // own note currency, the dependency on "you've already minted some of
-  // that note" stays implicit.
-  const handleUnlockPlanet = useCallback(
-    (id: BodyId): boolean => {
-      if (resonators[id]) return false
-      const cur = resonators[activePlanet]
-      if (!cur) return false
-      const cost = planetUnlockCost(id)
-      if (!canAffordPurse(cur.currencies, cost)) return false
-      setResonators((prev) => {
-        const curPrev = prev[activePlanet]
-        if (!curPrev) return prev
-        if (prev[id]) return prev
-        return {
-          ...prev,
-          [activePlanet]: {
-            ...curPrev,
-            currencies: subtractCost(curPrev.currencies, cost),
-          },
-          [id]: makeInitialResonator(),
-        }
-      })
-      setActivePlanet(id)
-      setTab('harvest')
-      return true
-    },
-    [resonators, activePlanet],
-  )
-
+  // Switch active planet, creating a fresh resonator for it the first time
+  // it's opened. Currently free — the unlock cost is gated off for debug
+  // so any planet can be opened from the wheel without grinding currency.
   const handleSelectPlanet = useCallback(
     (id: BodyId) => {
-      if (resonators[id]) {
-        if (activePlanet !== id) setActivePlanet(id)
-        setTab('harvest')
-        return
-      }
-      handleUnlockPlanet(id)
+      setResonators((prev) => {
+        if (prev[id]) return prev
+        return { ...prev, [id]: makeInitialResonator() }
+      })
+      if (activePlanet !== id) setActivePlanet(id)
+      setTab('harvest')
     },
-    [resonators, activePlanet, handleUnlockPlanet],
+    [activePlanet],
   )
 
   // Progressive disclosure: only show 1 card per category at any time so the
@@ -1128,12 +1098,10 @@ function App() {
         {BODIES.map((body) => {
           const isActive = activePlanet === body.id
           const isUnlocked = !!resonators[body.id]
-          const cost = !isUnlocked ? planetUnlockCost(body.id) : null
-          const affordable = isUnlocked || (!!cost && canAffordPurse(currencies, cost))
           const color = PAD_COLORS[body.id] ?? 'var(--accent)'
           const label = isUnlocked
             ? `Switch to ${body.name} resonator`
-            : `Unlock ${body.name} resonator (${PLANET_UNLOCK_BASE} ${body.id})`
+            : `Open a fresh ${body.name} resonator`
           return (
             <button
               key={body.id}
@@ -1142,7 +1110,7 @@ function App() {
               aria-selected={isActive}
               className={`planet-chip${isActive ? ' on' : ''}${
                 isUnlocked ? '' : ' locked'
-              }${!isUnlocked && !affordable ? ' unaffordable' : ''}`}
+              }`}
               style={{ ['--chip-color' as string]: color }}
               onClick={() => handleSelectPlanet(body.id)}
               title={label}
@@ -1150,11 +1118,6 @@ function App() {
             >
               <span className="planet-chip-swatch" aria-hidden="true" />
               <span className="planet-chip-id">{body.id}</span>
-              {!isUnlocked && (
-                <span className="planet-chip-cost" aria-hidden="true">
-                  {PLANET_UNLOCK_BASE}
-                </span>
-              )}
             </button>
           )
         })}
@@ -1286,21 +1249,14 @@ function App() {
           {BODIES.map((body) => {
             const isActive = activePlanet === body.id
             const isUnlocked = !!resonators[body.id]
-            const isLocked = !isUnlocked
-            const cost = isLocked ? planetUnlockCost(body.id) : null
-            const unlockHint = cost
-              ? `${PLANET_UNLOCK_BASE} ${body.id}`
-              : undefined
-            const affordable = !isLocked || (!!cost && canAffordPurse(currencies, cost))
             return (
               <li key={body.id}>
                 <PlanetTile
                   body={body}
                   armed={armed[body.id] ?? false}
                   active={isActive}
-                  locked={isLocked}
-                  unlockHint={unlockHint}
-                  affordable={affordable}
+                  locked={!isUnlocked}
+                  affordable={true}
                   onSelect={() => handleSelectPlanet(body.id)}
                   onLongPress={() => setUpgradeFor(body)}
                 />
