@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
-import { BODIES, ratioLabel as toRatioLabel } from './bodies'
-import type { BodyId } from './bodies'
+import { BODIES, inKeyPartialSet, ratioLabel as toRatioLabel } from './bodies'
+import type { Body, BodyId } from './bodies'
 import {
   AUTO_PLUCK_PENALTY,
   COINCIDENCE_TOL,
@@ -151,7 +151,10 @@ type Particle = {
 }
 
 type Props = {
-  unlockedIds: readonly BodyId[]
+  // The planet whose resonator is being played. Drives the in-key partial
+  // set that constrains slot choices. Slot notes still ring at their
+  // absolute pitches — only the picker offer set changes per station.
+  station: Body
   slots: ReadonlyArray<readonly BodyId[]>
   slotCount: number
   slotCapacities: readonly number[]
@@ -159,10 +162,15 @@ type Props = {
   noteYieldMul: (id: BodyId) => number
   onSlotChange: (slotIdx: number, newNotes: readonly BodyId[]) => void
   onEarn: (delta: CurrencyPurse) => void
+  // Graduation state for this station, surfaced as a header strip so the
+  // player can see where they stand without scrolling to the orbit tab.
+  stage1: boolean
+  stage2: boolean
+  exportable: ReadonlySet<BodyId>
 }
 
 export function HarvestStage({
-  unlockedIds,
+  station,
   slots,
   slotCount,
   slotCapacities,
@@ -170,7 +178,17 @@ export function HarvestStage({
   noteYieldMul,
   onSlotChange,
   onEarn,
+  stage1,
+  stage2,
+  exportable,
 }: Props) {
+  // In-key partials of the station's tonic — the only pitch classes the
+  // resonator at this planet can mint locally, and the only notes the
+  // slot pickers offer.
+  const inKeyNotes = useMemo(
+    () => inKeyPartialSet(station, HARMONIC_COUNT),
+    [station],
+  )
   const svgRef = useRef<SVGSVGElement>(null)
   const cloudGroupRef = useRef<SVGGElement>(null)
   const burstGroupRef = useRef<SVGGElement>(null)
@@ -215,7 +233,7 @@ export function HarvestStage({
   const harmonicHints = useMemo(() => {
     type Hint = { freq: number; colors: string[]; key: string }
     const map = new Map<string, Hint>()
-    for (const id of unlockedIds) {
+    for (const id of inKeyNotes) {
       const body = BODIES.find((b) => b.id === id)
       if (!body) continue
       const color = PAD_COLORS[id]
@@ -231,7 +249,7 @@ export function HarvestStage({
       }
     }
     return Array.from(map.values()).filter((h) => h.colors.length > 1)
-  }, [unlockedIds])
+  }, [inKeyNotes])
 
   // Fast lookup the rAF/handleSlot paths use to decide whether a partial
   // just landed on a hint slot (triggering the soft glow feedback).
@@ -862,9 +880,7 @@ export function HarvestStage({
         if (i === slotIdx) return
         for (const id of s) taken.add(id)
       })
-      const available = BODIES
-        .filter((b) => unlockedIds.includes(b.id) && !taken.has(b.id))
-        .map((b) => b.id)
+      const available = inKeyNotes.filter((id) => !taken.has(id))
       if (available.length === 0) return
       if (current === null) {
         onSlotChange(slotIdx, [dir === 1 ? available[0] : available[available.length - 1]])
@@ -878,7 +894,7 @@ export function HarvestStage({
       const next = available[(i + dir + available.length) % available.length]
       onSlotChange(slotIdx, [next])
     },
-    [slots, slotCapacities, unlockedIds, onSlotChange],
+    [slots, slotCapacities, inKeyNotes, onSlotChange],
   )
 
   // Window-level pointerup so we resolve swipes regardless of where the
@@ -912,8 +928,56 @@ export function HarvestStage({
     }
   }, [cycleSlotNote])
 
+  const exportList = useMemo(() => {
+    return inKeyNotes.filter((id) => exportable.has(id))
+  }, [inKeyNotes, exportable])
+
   return (
     <section className="harvest" aria-label="Resonator stage">
+      <header
+        className="station-header"
+        aria-label={`Station ${station.id}`}
+        style={{ ['--chip-color' as string]: PAD_COLORS[station.id] ?? 'var(--text)' }}
+      >
+        <span className="station-header-key">{station.id}</span>
+        <span className="station-header-name">{station.name}</span>
+        <span className="station-header-keys">
+          in-key:{' '}
+          {inKeyNotes.map((id, i) => (
+            <span key={id}>
+              {i > 0 ? ' · ' : ''}
+              <span style={{ color: PAD_COLORS[id] }}>{id}</span>
+            </span>
+          ))}
+        </span>
+        <span className="station-header-pips">
+          <span
+            className={`grad-pip${stage1 ? ' on' : ''}`}
+            title="Stage 1 · export unlocked when all slots open + auto-pluck on slot 1"
+          >
+            ◇ export
+          </span>
+          <span
+            className={`grad-pip${stage2 ? ' on' : ''}`}
+            title="Stage 2 · drone chime unlocked when every in-key partial has a yield upgrade"
+          >
+            ✦ chime
+          </span>
+          {stage1 && (
+            <span className="grad-export" title="Exportable subset (sent on launch)">
+              ships:{' '}
+              {exportList.length === 0
+                ? '—'
+                : exportList.map((id, i) => (
+                    <span key={id}>
+                      {i > 0 ? '·' : ''}
+                      <span style={{ color: PAD_COLORS[id] }}>{id}</span>
+                    </span>
+                  ))}
+            </span>
+          )}
+        </span>
+      </header>
       <svg
         ref={svgRef}
         className="spectrum"
@@ -1193,7 +1257,7 @@ export function HarvestStage({
                   </button>
                 )}
                 {BODIES.map((b) => {
-                  if (!unlockedIds.includes(b.id)) return null
+                  if (!inKeyNotes.includes(b.id)) return null
                   const inOther = slots.some((s, i) => i !== idx && s.includes(b.id))
                   const isHere = notes.includes(b.id)
                   // Only stack slots can be "full" — for cap-1 the picker
@@ -1228,9 +1292,10 @@ export function HarvestStage({
         )
       })()}
       <p className="harvest-hint">
-        Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play; swipe
-        left/right to swap its note. Each note mints its own currency; land coincident partials while the first
-        rings to mint a freq currency. Auto-plucked slots fire themselves at half yield (⚡).
+        Station <strong>{station.id}</strong> · pickers offer {inKeyNotes.join(' · ')} (this station's in-key
+        partials). Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play;
+        swipe to swap its note. Each tap mints its note currency; land coincident partials while the first rings to
+        mint a freq currency. Auto-plucked slots fire themselves at half yield (⚡).
       </p>
     </section>
   )

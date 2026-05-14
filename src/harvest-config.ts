@@ -3,17 +3,25 @@
 // component (react-refresh requirement) and so App.tsx can read the same
 // numbers the on-tab auto-pluck path uses.
 
-import { BODIES } from './bodies'
-import type { BodyId } from './bodies'
+import { BODIES, C_REF_HZ } from './bodies'
+import type { Body, BodyId } from './bodies'
 import {
   defaultAmp,
   harmonicSeries,
   idlePairFreqCountsPerSec,
 } from './harmonics'
 
-// Tonic frequency: C3 (130.81 Hz). Matches the orbital stage's EARTH_HZ so
-// the harvest pluck synth stays in tune with the orbital drone.
-export const TONIC_HZ = 261.63 / 2
+// Reference tonic for pitch-class snapping and freq-coincidence math.
+// Matches the orbital stage's C_REF_HZ so the harvest pluck synth and
+// the orbital drone stay in tune.
+export const TONIC_HZ = C_REF_HZ
+
+// Tonic frequency for the resonator at a given body. Each station plays
+// in its own key — the per-station tonic is `C_REF_HZ * body.ratio`. Slot
+// notes still ring at their absolute pitches (every body's id maps to the
+// same absolute Hz everywhere), so the freq-coincidence math is anchored
+// to C_REF_HZ.
+export const tonicHzOf = (body: Body) => C_REF_HZ * body.ratio
 
 // H6 reaches M3 (5:4) and M6 (5:3); M2 (9:8 → H≥9) and M7 (15:8 → H≥15)
 // remain unreachable.

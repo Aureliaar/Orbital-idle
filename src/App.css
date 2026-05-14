@@ -1565,3 +1565,141 @@ main h1 {
 .upgrade-mul-next {
   animation: none;
 }
+
+/* --- Station selector & header --- */
+
+.station-row {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  width: min(720px, 96vw);
+  margin: 0;
+  padding: 0;
+}
+
+.station-chip {
+  --chip-color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 35%, var(--border));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.station-chip:hover {
+  color: var(--text-h);
+}
+
+.station-chip.on {
+  background: color-mix(in srgb, var(--chip-color) 16%, transparent);
+  color: var(--text-h);
+  border-color: var(--chip-color);
+}
+
+.station-chip-key {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--chip-color);
+}
+
+.station-chip-name {
+  font-size: 0.74rem;
+  opacity: 0.75;
+}
+
+.station-chip-badge {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-left: 2px;
+}
+
+.station-header {
+  --chip-color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 30%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--chip-color) 5%, transparent);
+  font-size: 0.85rem;
+}
+
+.station-header-key {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--chip-color);
+}
+
+.station-header-name {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.station-header-keys {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.station-header-pips {
+  margin-left: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.grad-pip {
+  opacity: 0.5;
+  color: var(--text);
+}
+
+.grad-pip.on {
+  opacity: 1;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.grad-export {
+  color: var(--text-h);
+}
+
+/* --- Launch gate / cargo manifest --- */
+
+.launch-gate,
+.launch-cargo {
+  width: min(720px, 96vw);
+  margin: 6px auto 0;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  text-align: center;
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.launch-cargo {
+  border-style: solid;
+  color: var(--text-h);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.emission-badge {
+  color: var(--accent);
+  font-weight: 600;
+}

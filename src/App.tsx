@@ -4,7 +4,15 @@ import './App.css'
 import type { AudioGraph } from './audio'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { Body, BodyId } from './bodies'
-import { BODIES, EARTH, EARTH_PERIOD_S, TARGETS, periodOf } from './bodies'
+import {
+  BODIES,
+  C_REF_HZ,
+  EARTH,
+  inKeyPartialSet,
+  intervalBetween,
+  periodOf,
+  routeToleranceMul,
+} from './bodies'
 import { HarvestStage } from './HarvestStage'
 import {
   addToPurse,
@@ -15,6 +23,7 @@ import {
   FREQ_CURRENCY_KEYS,
   FREQ_INTERVAL_LABEL,
   FREQ_SOURCES,
+  HARMONIC_COUNT,
   INITIAL_SLOT_COUNT,
   MAX_SLOT0_CAPACITY,
   MAX_SLOT_COUNT,
@@ -32,44 +41,98 @@ import { UpgradePanel } from './UpgradePanel'
 
 type Tab = 'orbits' | 'harvest'
 
-// --- Cost tables --------------------------------------------------------
+// --- Per-station state -------------------------------------------------
 //
-// Every cost is a CurrencyPurse. Note-currencies (C..B) come from tapping
-// that note; freq-currencies (F3, F15_4, F4, F9_2, F5, F45_8, F6, F20_3,
-// F15_2) come from landing a partial-pair coincidence at that frequency.
-// Each coincidence mints exactly one unit of the freq-currency for the
-// frequency where its partials lined up.
-//
-// Reachable coincidences in the diatonic at H≤6 (so we know which freq
-// is earnable once each ladder step opens):
-//   C×E (M3, freq=5)              → F5
-//   C×G (P5, freq=3 and freq=6)   → F3, F6
-//   C×F (P4, freq=4)              → F4
-//   C×A (M6, freq=5)              → F5
-//   D×G (P4, freq=9/2)            → F9_2
-//   D×B (M6, freq=45/8)           → F45_8
-//   E×G (m3, freq=15/2)           → F15_2
-//   E×A (P4, freq=5)              → F5
-//   E×B (P5, freq=15/4 and 15/2)  → F15_4, F15_2
-//   F×A (M3, freq=20/3)           → F20_3
-//   G×B (M3, freq=15/2)           → F15_2
-// Every entry on the ladder requires a freq-currency that the previous
-// steps have already made earnable.
+// Every planet hosts its own resonator. What used to be top-level App
+// state (slot config, slot capacity, auto-pluck set, per-note yield
+// levels) lives here, indexed by `station: BodyId`. The shared purse and
+// the orbital canvas stay top-level — currencies are global, the wheel
+// is global, the work that mints them is per-station.
 
-const UNLOCK_LADDER: BodyId[] = ['C', 'E', 'G', 'F', 'A', 'D', 'B']
-const UNLOCK_COSTS: Record<BodyId, CurrencyPurse> = {
-  C: {},
-  E: { C: 5 },
-  G: { C: 8, E: 4, F5: 2 }, // proves C×E
-  F: { C: 15, E: 6, G: 6, F3: 2, F6: 2 }, // proves C×G in both octaves
-  A: { E: 12, G: 12, F: 6, F4: 4 }, // proves C×F
-  D: { G: 18, F: 12, A: 8, F5: 4, F15_2: 3 }, // proves E×G or G×B
-  B: { D: 10, A: 10, G: 15, F: 12, F9_2: 4, F20_3: 4 }, // proves D×G and F×A
+type StationState = {
+  // Has a probe ever landed here? (Earth is open from the start.) Locked
+  // stations don't appear in the selector.
+  unlocked: boolean
+  slots: BodyId[][]
+  slotCount: number
+  slot0Capacity: number
+  autoPluckSlots: ReadonlySet<number>
+  noteYieldLvls: Partial<Record<BodyId, number>>
+  // Stage 1: exports unlocked. Exportable always starts as {tonic} and
+  // expands as yield upgrades land on in-key partials.
+  stage1: boolean
+  exportable: ReadonlySet<BodyId>
+  // Stage 2: this station's voice chimes into the orbital drone.
+  stage2: boolean
 }
 
-// Auto-pluck base cost — a "you've played the diatonic" tax. Each note
-// you've actually used shows up as a fee, so the price reflects your
-// breadth of play. Successive slots scale by 1.6.
+const emptyStation = (body: Body): StationState => ({
+  unlocked: false,
+  slots: [[body.id]],
+  slotCount: INITIAL_SLOT_COUNT,
+  slot0Capacity: 1,
+  autoPluckSlots: new Set(),
+  noteYieldLvls: {},
+  stage1: false,
+  exportable: new Set(),
+  stage2: false,
+})
+
+const initialStations = (): Record<BodyId, StationState> => {
+  const out = {} as Record<BodyId, StationState>
+  for (const b of BODIES) out[b.id] = emptyStation(b)
+  out.C.unlocked = true
+  return out
+}
+
+// Stage-1 gate: every slot unlocked + auto-pluck on slot 0.
+const isStage1Ready = (s: StationState) =>
+  s.slotCount >= MAX_SLOT_COUNT && s.autoPluckSlots.has(0)
+
+// Stage-2 gate: yield level ≥ 1 for every in-key partial of this station.
+const isStage2Ready = (s: StationState, inKey: readonly BodyId[]) =>
+  inKey.length > 0 && inKey.every((id) => (s.noteYieldLvls[id] ?? 0) >= 1)
+
+// Promote a station through any stage / export-set updates it has earned.
+// Idempotent — already-graduated stages stay graduated. Run inside every
+// state mutation that touches a gate-relevant field.
+function promoteStation(s: StationState, body: Body): StationState {
+  const inKey = inKeyPartialSet(body, HARMONIC_COUNT)
+  let next = s
+  if (!next.stage1 && isStage1Ready(next)) {
+    next = { ...next, stage1: true, exportable: new Set([body.id]) }
+  }
+  if (next.stage1) {
+    const exp = new Set(next.exportable)
+    let changed = false
+    for (const id of inKey) {
+      if ((next.noteYieldLvls[id] ?? 0) >= 1 && !exp.has(id)) {
+        exp.add(id)
+        changed = true
+      }
+    }
+    if (changed) next = { ...next, exportable: exp }
+  }
+  if (!next.stage2 && next.stage1 && isStage2Ready(next, inKey)) {
+    next = { ...next, stage2: true }
+  }
+  return next
+}
+
+// --- Cost tables --------------------------------------------------------
+//
+// All costs are CurrencyPurse over the 16 currencies. Note-currencies
+// (C..B) come from tapping that note at any station whose harmonic series
+// includes it; freq-currencies (F3..F15_2) come from landing a partial
+// coincidence at that frequency. The currency set is global and the same
+// at every station — what changes per station is *which notes the slot
+// pickers offer* (only the station's in-key partials).
+//
+// Per-station unlock progression is gone — new stations open up via probe
+// arrivals. What's left at the station level is slot/auto-pluck/yield
+// scaling. Costs deliberately demand a mix of pitch-class and freq
+// currencies so progressing one station still rewards another's exports.
+
 const AUTO_PLUCK_BASE_COST: CurrencyPurse = {
   C: 120,
   E: 80,
@@ -80,7 +143,6 @@ const AUTO_PLUCK_BASE_COST: CurrencyPurse = {
   F4: 8,
   F6: 8,
 }
-const AUTO_PLUCK_MIN_UNLOCKS = 3
 const autoPluckCost = (slotIdx: number): CurrencyPurse => {
   const factor = 1.6 ** slotIdx
   const out: CurrencyPurse = {}
@@ -90,22 +152,15 @@ const autoPluckCost = (slotIdx: number): CurrencyPurse => {
   return out
 }
 
-// Slot 2 unlocks once E is in hand and costs a single E — the gate note
-// itself pays for the slot, so the player has to mint E before the slot is
-// reachable, but the price is symbolic. With one slot you can't make a
-// coincidence yet, so a freq requirement would be unreachable. Slot 3
-// demands freq currency — by then you've had a pair of slots ringing
-// together for a while.
+// Slot 2 is cheap — with one slot you can't land a coincidence yet, so
+// the price stays in pure note currency. Slot 3 demands freq currency
+// because by then a pair of slots has been ringing together for a while.
 const SLOT_UNLOCK_COSTS: Record<number, CurrencyPurse> = {
-  2: { E: 1 },
+  2: { C: 6 },
   3: { C: 30, E: 18, G: 12, F3: 4, F5: 6 },
 }
-const SLOT_UNLOCK_GATES: Record<number, BodyId> = {
-  2: 'E',
-}
 
-// Slot 0 capacity ladder — stacking chords. Pricing demands a chord-
-// shaped freq mix.
+// Slot 0 capacity ladder — stacking chords.
 const SLOT0_CAPACITY_COSTS: Record<number, CurrencyPurse> = {
   2: { E: 30, G: 20, F5: 6, F15_2: 4 },
   3: { F: 50, A: 30, F3: 6, F4: 6, F5: 6, F15_2: 6 },
@@ -137,12 +192,14 @@ const noteYieldCost = (id: BodyId, lvl: number): CurrencyPurse => ({
 })
 
 const PROBE_DURATION_S = 1.4
-const HALO_PROXIMITY = 0.93
+// Base proximity threshold for arming launches. Per-route tolerance
+// multipliers (routeToleranceMul) stretch this so consonant pairs arm
+// easily and tritone routes demand tight phase alignment.
+const HALO_PROXIMITY_BASE = 0.93
 
-// Earth → C3 (130.81 Hz). Each body's just-intonation period ratio places it
-// on the diatonic scale starting from C, so the visual note labels match the
-// audible pitches: D3, E3, F3, G3, A3, B3.
-const EARTH_HZ = 261.63 / 2
+// Reference C3 (130.81 Hz). Each body's 12-TET ratio places it on the
+// diatonic scale: C3, D3, E3, F3, G3, A3, B3.
+const EARTH_HZ = C_REF_HZ
 
 const VOICE_FLOOR_GAIN = 0.002
 const VOICE_PEAK_GAIN = 0.16
@@ -164,7 +221,7 @@ const TIMBRE_LABELS: Record<Timbre, string> = {
   synth: 'Synth',
 }
 
-type Probe = { startMs: number }
+type Probe = { startMs: number; source: BodyId; cargo: CurrencyPurse }
 type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
 type ToneVoice = {
@@ -175,7 +232,6 @@ type ToneVoice = {
 type OrbitAudio = {
   graph: AudioGraph
   voices: Map<BodyId, ToneVoice>
-  earth: ToneVoice
   timbre: Timbre
 }
 
@@ -386,25 +442,46 @@ function App() {
   const [tab, setTab] = useState<Tab>('harvest')
   const [currencies, setCurrencies] = useState<CurrencyPurse>({})
   const [seenCurrencies, setSeenCurrencies] = useState<Set<CurrencyKey>>(() => new Set(['C']))
-  const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
-  const [slotCount, setSlotCount] = useState(INITIAL_SLOT_COUNT)
-  const [slots, setSlots] = useState<BodyId[][]>(() => {
-    const init: BodyId[][] = []
-    for (let i = 0; i < INITIAL_SLOT_COUNT; i++) init.push([])
-    init[0] = ['C']
-    return init
-  })
-  const [slot0Capacity, setSlot0Capacity] = useState(1)
-  const [autoPluckSlots, setAutoPluckSlots] = useState<ReadonlySet<number>>(() => new Set())
-  const [noteYieldLvls, setNoteYieldLvls] = useState<Partial<Record<BodyId, number>>>({})
+  const [stations, setStations] = useState<Record<BodyId, StationState>>(initialStations)
+  const [activeStationId, setActiveStationId] = useState<BodyId>('C')
+
+  const activeBody = useMemo(
+    () => BODIES.find((b) => b.id === activeStationId) ?? EARTH,
+    [activeStationId],
+  )
+  const activeStation = stations[activeStationId]
+  const activeInKey = useMemo(
+    () => inKeyPartialSet(activeBody, HARMONIC_COUNT),
+    [activeBody],
+  )
+  const unlockedStations = useMemo(
+    () => BODIES.filter((b) => stations[b.id].unlocked),
+    [stations],
+  )
+
   const slotCapacities = useMemo(
-    () => Array.from({ length: slotCount }, (_, i) => (i === 0 ? slot0Capacity : 1)),
-    [slotCount, slot0Capacity],
+    () =>
+      Array.from({ length: activeStation.slotCount }, (_, i) =>
+        i === 0 ? activeStation.slot0Capacity : 1,
+      ),
+    [activeStation.slotCount, activeStation.slot0Capacity],
   )
 
   const noteYieldMul = useCallback(
-    (id: BodyId) => noteYieldMultiplier(noteYieldLvls[id] ?? 0),
-    [noteYieldLvls],
+    (id: BodyId) => noteYieldMultiplier(activeStation.noteYieldLvls[id] ?? 0),
+    [activeStation.noteYieldLvls],
+  )
+
+  const updateStation = useCallback(
+    (id: BodyId, mut: (s: StationState) => StationState) => {
+      setStations((prev) => {
+        const body = BODIES.find((b) => b.id === id)
+        if (!body) return prev
+        const mutated = mut(prev[id])
+        return { ...prev, [id]: promoteStation(mutated, body) }
+      })
+    },
+    [],
   )
 
   const earn = useCallback((delta: CurrencyPurse) => {
@@ -425,13 +502,39 @@ function App() {
       return changed ? next : prev
     })
   }, [])
+  const earnRef = useRef(earn)
+  useEffect(() => {
+    earnRef.current = earn
+  }, [earn])
 
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
-    new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
+    new Map(BODIES.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
   const launchRequestRef = useRef<BodyId | null>(null)
   const phaseRef = useRef<Map<BodyId, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
+  // Ref-mirrored values so the rAF canvas loop reads the latest active
+  // station / per-route tolerance / stage-2 set without re-installing the
+  // effect on every state change.
+  const activeStationRef = useRef<BodyId>(activeStationId)
+  useEffect(() => {
+    activeStationRef.current = activeStationId
+  }, [activeStationId])
+  const routeTolMulRef = useRef<Partial<Record<BodyId, number>>>({})
+  useEffect(() => {
+    const out: Partial<Record<BodyId, number>> = {}
+    for (const b of BODIES) {
+      if (b.id === activeStationId) continue
+      out[b.id] = routeToleranceMul(activeBody, b)
+    }
+    routeTolMulRef.current = out
+  }, [activeStationId, activeBody])
+  const stage2Ref = useRef<Set<BodyId>>(new Set())
+  useEffect(() => {
+    const set = new Set<BodyId>()
+    for (const b of BODIES) if (stations[b.id].stage2) set.add(b.id)
+    stage2Ref.current = set
+  }, [stations])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -470,16 +573,18 @@ function App() {
       const textH = styles.getPropertyValue('--text-h').trim() || '#08060d'
       const textM = styles.getPropertyValue('--text').trim() || '#6b6375'
 
-      const earthAngle = ((t / EARTH_PERIOD_S) + EARTH.phase) * 2 * Math.PI
+      const sourceId = activeStationRef.current
+      const sourceBody = BODIES.find((b) => b.id === sourceId) ?? EARTH
+      const sourceAngle = ((t / periodOf(sourceBody)) + sourceBody.phase) * 2 * Math.PI
 
       const positions = ORBITS.map((body, i) => {
         const r = rMin + (rMax - rMin) * (i / (ORBITS.length - 1))
         const angle = ((t / periodOf(body)) + body.phase) * 2 * Math.PI
-        let delta = Math.abs(((earthAngle - angle) % (2 * Math.PI)))
+        let delta = Math.abs(((sourceAngle - angle) % (2 * Math.PI)))
         if (delta > Math.PI) delta = 2 * Math.PI - delta
         return { body, angle, r, delta }
       })
-      const earthPos = positions.find((p) => p.body.id === EARTH.id)!
+      const sourcePos = positions.find((p) => p.body.id === sourceId)!
 
       const swells = swellsRef.current
       const launchedId = launchRequestRef.current
@@ -492,11 +597,17 @@ function App() {
         }
       }
 
+      const tolMuls = routeTolMulRef.current
       for (const { body, delta } of positions) {
-        if (body.id === EARTH.id) continue
+        if (body.id === sourceId) continue
         const s = swells.get(body.id)
         if (!s) continue
-        const proximity = 1 - delta / Math.PI
+        // Per-route tolerance: a wider arc counts as "in the window" for
+        // small-denominator just approximations of the source→target
+        // interval. P5 routes feel forgiving; the tritone demands tight
+        // phase alignment.
+        const mul = tolMuls[body.id] ?? 1
+        const proximity = Math.max(0, Math.min(1, 1 - delta / (Math.PI * mul)))
         const target = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * Math.pow(proximity, 3)
         if (s.releasing) {
           s.held += (VOICE_FLOOR_GAIN - s.held) * (1 - Math.exp(-dt / SWELL_RELEASE_TAU))
@@ -515,6 +626,7 @@ function App() {
       const a = audioRef.current
       const phases = phaseRef.current
       const audioReady = !!a && a.graph.ctx.state === 'running' && tabRef.current === 'orbits'
+      const stage2 = stage2Ref.current
       const strike = (voice: ToneVoice, velocity: number) => {
         if (!audioReady) return
         const v = Math.max(0, Math.min(1, velocity))
@@ -529,11 +641,17 @@ function App() {
         const wrapped = phase < last
         if (!wrapped) continue
         if (!audioReady) continue
-        if (body.id === EARTH.id) {
-          strike(a!.earth, EARTH_VELOCITY)
+        // Only the source station and stage-2-graduated stations chime
+        // into the orbital drone. The source is always audible — it's the
+        // player's anchor; other voices stay silent until their station
+        // earns its emission badge.
+        const emits = body.id === sourceId || stage2.has(body.id)
+        if (!emits) continue
+        const voice = a!.voices.get(body.id)
+        if (!voice) continue
+        if (body.id === sourceId) {
+          strike(voice, EARTH_VELOCITY)
         } else {
-          const voice = a!.voices.get(body.id)
-          if (!voice) continue
           const s = swells.get(body.id)
           const norm = s
             ? (s.held - VOICE_FLOOR_GAIN) / (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN)
@@ -544,7 +662,8 @@ function App() {
       }
 
       const nextArmed: ArmedMap = {}
-      for (const body of TARGETS) {
+      for (const body of BODIES) {
+        if (body.id === sourceId) continue
         const s = swells.get(body.id)
         nextArmed[body.id] = !!(s && !s.releasing && s.held > LAUNCH_ARM_GAIN)
       }
@@ -560,9 +679,10 @@ function App() {
       ctx.fillStyle = accentBg
       let anyAligned = false
       for (const { body, angle, r, delta } of positions) {
-        if (body.id === EARTH.id) continue
-        const proximity = 1 - delta / Math.PI
-        if (proximity > HALO_PROXIMITY) {
+        if (body.id === sourceId) continue
+        const mul = tolMuls[body.id] ?? 1
+        const proximity = Math.max(0, Math.min(1, 1 - delta / (Math.PI * mul)))
+        if (proximity > HALO_PROXIMITY_BASE) {
           const px = cx + Math.cos(angle) * r
           const py = cy + Math.sin(angle) * r
           ctx.beginPath()
@@ -572,10 +692,10 @@ function App() {
         }
       }
       if (anyAligned) {
-        const ex = cx + Math.cos(earthPos.angle) * earthPos.r
-        const ey = cy + Math.sin(earthPos.angle) * earthPos.r
+        const sx = cx + Math.cos(sourcePos.angle) * sourcePos.r
+        const sy = cy + Math.sin(sourcePos.angle) * sourcePos.r
         ctx.beginPath()
-        ctx.arc(ex, ey, 14, 0, 2 * Math.PI)
+        ctx.arc(sx, sy, 14, 0, 2 * Math.PI)
         ctx.fill()
       }
 
@@ -587,27 +707,29 @@ function App() {
       for (const { body, angle, r } of positions) {
         const px = cx + Math.cos(angle) * r
         const py = cy + Math.sin(angle) * r
-        const isEarth = body.id === EARTH.id
-        ctx.fillStyle = isEarth ? textH : nextArmed[body.id] ? accent : textM
+        const isSource = body.id === sourceId
+        ctx.fillStyle = isSource ? textH : nextArmed[body.id] ? accent : textM
         ctx.beginPath()
-        ctx.arc(px, py, isEarth ? 6 : 5, 0, 2 * Math.PI)
+        ctx.arc(px, py, isSource ? 6 : 5, 0, 2 * Math.PI)
         ctx.fill()
       }
 
-      const toRemove: BodyId[] = []
+      type ArrivedProbe = { id: BodyId; probe: Probe }
+      const arrived: ArrivedProbe[] = []
       probesRef.current.forEach((probe, id) => {
         const u = (now - probe.startMs) / 1000 / PROBE_DURATION_S
         if (u >= 1) {
-          toRemove.push(id)
+          arrived.push({ id, probe })
           return
         }
         const target = positions.find((p) => p.body.id === id)
         if (!target) return
-        const r = earthPos.r + (target.r - earthPos.r) * u
-        let delta = (target.angle - earthAngle) % (2 * Math.PI)
+        const src = positions.find((p) => p.body.id === probe.source) ?? sourcePos
+        const r = src.r + (target.r - src.r) * u
+        let delta = (target.angle - src.angle) % (2 * Math.PI)
         if (delta > Math.PI) delta -= 2 * Math.PI
         if (delta < -Math.PI) delta += 2 * Math.PI
-        const angle = earthAngle + delta * u
+        const angle = src.angle + delta * u
         const px = cx + Math.cos(angle) * r
         const py = cy + Math.sin(angle) * r
         ctx.fillStyle = accent
@@ -615,19 +737,29 @@ function App() {
         ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
         ctx.fill()
       })
-      if (toRemove.length) {
-        for (const id of toRemove) probesRef.current.delete(id)
+      if (arrived.length) {
+        for (const { id, probe } of arrived) {
+          probesRef.current.delete(id)
+          // Credit cargo to the global purse and mark the destination
+          // station unlocked so its resonator becomes selectable.
+          earnRef.current(probe.cargo)
+          setStations((prev) => {
+            if (prev[id].unlocked) return prev
+            return { ...prev, [id]: { ...prev[id], unlocked: true } }
+          })
+        }
         setFlying((prev) => {
-          if (toRemove.every((id) => !prev.has(id))) return prev
+          if (arrived.every(({ id }) => !prev.has(id))) return prev
           const next = new Set(prev)
-          for (const id of toRemove) next.delete(id)
+          for (const { id } of arrived) next.delete(id)
           return next
         })
       }
 
       const prevArmed = armedRef.current
       let changed = false
-      for (const body of TARGETS) {
+      for (const body of BODIES) {
+        if (body.id === sourceId) continue
         if ((prevArmed[body.id] ?? false) !== (nextArmed[body.id] ?? false)) {
           changed = true
           break
@@ -646,15 +778,13 @@ function App() {
   }, [])
 
   const stopAudio = useCallback((audio: OrbitAudio) => {
-    const { graph, voices, earth } = audio
+    const { graph, voices } = audio
     teardownAudioGraph(graph, [])
     window.setTimeout(() => {
       for (const v of voices.values()) {
         v.synth.dispose()
         v.panner.dispose()
       }
-      earth.synth.dispose()
-      earth.panner.dispose()
     }, 400)
   }, [])
 
@@ -672,15 +802,14 @@ function App() {
       return { synth, panner, freq: hz }
     }
 
-    const earth = buildVoice(EARTH_HZ, 0)
     const voices = new Map<BodyId, ToneVoice>()
-    TARGETS.forEach((body, i) => {
-      const pan = -0.4 + (i / Math.max(1, TARGETS.length - 1)) * 0.8
+    BODIES.forEach((body, i) => {
+      const pan = -0.4 + (i / Math.max(1, BODIES.length - 1)) * 0.8
       const hz = EARTH_HZ * body.ratio
       voices.set(body.id, buildVoice(hz, pan))
     })
 
-    return { graph, voices, earth, timbre: nextTimbre }
+    return { graph, voices, timbre: nextTimbre }
   }, [])
 
   const handleSoundToggle = useCallback(() => {
@@ -750,23 +879,29 @@ function App() {
     }
   }, [tab, primePhases])
 
-  const idleRate = useMemo(
-    () => computeIdleRate(slots, autoPluckSlots, noteYieldLvls, YIELD_STEP),
-    [slots, autoPluckSlots, noteYieldLvls],
-  )
-  const anyAutoPluck = autoPluckSlots.size > 0
+  // Idle accrual sums every unlocked, auto-pluck-equipped station — each
+  // station's resonator runs its own auto-pluck timers when the player is
+  // looking at it (on-tab) and credits through the interval below when
+  // not. We skip the active station when its tab is open to avoid double-
+  // counting against HarvestStage's own on-tab path.
+  const idleRate = useMemo(() => {
+    let total: CurrencyPurse = {}
+    for (const b of BODIES) {
+      const s = stations[b.id]
+      if (!s.unlocked) continue
+      if (s.autoPluckSlots.size === 0) continue
+      if (b.id === activeStationId && tab === 'harvest') continue
+      const rate = computeIdleRate(s.slots, s.autoPluckSlots, s.noteYieldLvls, YIELD_STEP)
+      total = addToPurse(total, rate)
+    }
+    return total
+  }, [stations, activeStationId, tab])
   const idleHasFlow = useMemo(
     () => Object.values(idleRate).some((v) => (v ?? 0) > 0),
     [idleRate],
   )
 
-  // Off-tab idle accrual. The on-tab auto-pluck path credits directly via
-  // handleSlot → onEarn → earn(); running this ticker simultaneously would
-  // double-count. Mark seen currencies for everything the rate produces so
-  // chips appear in the UI even if the player is away.
   useEffect(() => {
-    if (!anyAutoPluck) return
-    if (tab === 'harvest') return
     if (!idleHasFlow) return
     let last = performance.now()
     const id = window.setInterval(() => {
@@ -781,20 +916,23 @@ function App() {
       if (Object.keys(delta).length > 0) earn(delta)
     }, 250)
     return () => window.clearInterval(id)
-  }, [tab, anyAutoPluck, idleHasFlow, idleRate, earn])
+  }, [idleHasFlow, idleRate, earn])
 
-  const handleSlotChange = useCallback((slotIdx: number, newNotes: readonly BodyId[]) => {
-    setSlots((prev) => {
-      const next = prev.map((s) => s.slice())
-      for (const note of newNotes) {
-        for (let i = 0; i < next.length; i++) {
-          if (i !== slotIdx) next[i] = next[i].filter((n) => n !== note)
+  const handleSlotChange = useCallback(
+    (slotIdx: number, newNotes: readonly BodyId[]) => {
+      updateStation(activeStationId, (s) => {
+        const next = s.slots.map((arr) => arr.slice())
+        for (const note of newNotes) {
+          for (let i = 0; i < next.length; i++) {
+            if (i !== slotIdx) next[i] = next[i].filter((n) => n !== note)
+          }
         }
-      }
-      next[slotIdx] = newNotes.slice()
-      return next
-    })
-  }, [])
+        next[slotIdx] = newNotes.slice()
+        return { ...s, slots: next }
+      })
+    },
+    [activeStationId, updateStation],
+  )
 
   const spendIfAffordable = useCallback(
     (cost: CurrencyPurse): boolean => {
@@ -805,132 +943,127 @@ function App() {
     [currencies],
   )
 
-  const handleUnlock = useCallback((id: BodyId) => {
-    if (unlockedIds.includes(id)) return
-    const cost = UNLOCK_COSTS[id]
-    if (!spendIfAffordable(cost)) return
-    setUnlockedIds((prev) => [...prev, id])
-    setSeenCurrencies((prev) => {
-      if (prev.has(id)) return prev
-      const next = new Set(prev)
-      next.add(id)
-      return next
-    })
-  }, [unlockedIds, spendIfAffordable])
-
-  const handleUnlockAutoPluck = useCallback((slotIdx: number) => {
-    if (autoPluckSlots.has(slotIdx)) return
-    if (slotIdx >= slotCount) return
-    if (unlockedIds.length < AUTO_PLUCK_MIN_UNLOCKS) return
-    const cost = autoPluckCost(slotIdx)
-    if (!spendIfAffordable(cost)) return
-    setAutoPluckSlots((prev) => {
-      const next = new Set(prev)
-      next.add(slotIdx)
-      return next
-    })
-  }, [autoPluckSlots, slotCount, unlockedIds.length, spendIfAffordable])
+  const handleUnlockAutoPluck = useCallback(
+    (slotIdx: number) => {
+      const s = stations[activeStationId]
+      if (s.autoPluckSlots.has(slotIdx)) return
+      if (slotIdx >= s.slotCount) return
+      const cost = autoPluckCost(slotIdx)
+      if (!spendIfAffordable(cost)) return
+      updateStation(activeStationId, (st) => {
+        const next = new Set(st.autoPluckSlots)
+        next.add(slotIdx)
+        return { ...st, autoPluckSlots: next }
+      })
+    },
+    [stations, activeStationId, spendIfAffordable, updateStation],
+  )
 
   const handleUnlockSlot = useCallback(() => {
-    const nextIdx = slotCount
+    const s = stations[activeStationId]
+    const nextIdx = s.slotCount
     if (nextIdx >= MAX_SLOT_COUNT) return
     const cost = SLOT_UNLOCK_COSTS[nextIdx + 1]
     if (!cost) return
     if (!spendIfAffordable(cost)) return
-    setSlotCount((c) => c + 1)
-    setSlots((prev) => [...prev, []])
-  }, [slotCount, spendIfAffordable])
+    updateStation(activeStationId, (st) => ({
+      ...st,
+      slotCount: st.slotCount + 1,
+      slots: [...st.slots, []],
+    }))
+  }, [stations, activeStationId, spendIfAffordable, updateStation])
 
   const handleUpgradeSlot0Capacity = useCallback(() => {
-    const nextCap = slot0Capacity + 1
+    const s = stations[activeStationId]
+    const nextCap = s.slot0Capacity + 1
     if (nextCap > MAX_SLOT0_CAPACITY) return
     const cost = SLOT0_CAPACITY_COSTS[nextCap]
     if (!cost) return
     if (!spendIfAffordable(cost)) return
-    setSlot0Capacity(nextCap)
-  }, [slot0Capacity, spendIfAffordable])
+    updateStation(activeStationId, (st) => ({ ...st, slot0Capacity: nextCap }))
+  }, [stations, activeStationId, spendIfAffordable, updateStation])
 
   const buyNoteYield = useCallback(
     (id: BodyId) => {
-      const lvl = noteYieldLvls[id] ?? 0
+      const s = stations[activeStationId]
+      const lvl = s.noteYieldLvls[id] ?? 0
       const cost = noteYieldCost(id, lvl)
       if (!spendIfAffordable(cost)) return
-      setNoteYieldLvls((prev) => ({ ...prev, [id]: lvl + 1 }))
+      updateStation(activeStationId, (st) => ({
+        ...st,
+        noteYieldLvls: { ...st.noteYieldLvls, [id]: lvl + 1 },
+      }))
     },
-    [noteYieldLvls, spendIfAffordable],
+    [stations, activeStationId, spendIfAffordable, updateStation],
   )
 
-  // Progressive disclosure: only show 1 card per category at any time so the
-  // panel stays a punch-list of the next concrete action, not a wall of
-  // hypotheticals. Once the player buys it, the next candidate slides in.
-  const nextUnlocks = UNLOCK_LADDER.filter((id) => !unlockedIds.includes(id)).slice(0, 1)
-  const nextSlotIdx = slotCount + 1
-  const slotGate = SLOT_UNLOCK_GATES[nextSlotIdx]
-  const slotGatePassed = slotGate ? unlockedIds.includes(slotGate) : true
-  const nextSlotCost = slotGatePassed ? SLOT_UNLOCK_COSTS[nextSlotIdx] : undefined
+  // Progressive disclosure: only show 1 card per category at a time so the
+  // panel stays a punch-list of the next concrete action.
+  const nextSlotIdx = activeStation.slotCount + 1
+  const nextSlotCost = SLOT_UNLOCK_COSTS[nextSlotIdx]
   const canAffordSlot = nextSlotCost ? canAffordPurse(currencies, nextSlotCost) : false
-  const nextSlot0Cap = slot0Capacity + 1
+  const nextSlot0Cap = activeStation.slot0Capacity + 1
   const slot0CapCost =
-    nextSlot0Cap <= MAX_SLOT0_CAPACITY && unlockedIds.length >= 2
-      ? SLOT0_CAPACITY_COSTS[nextSlot0Cap]
-      : undefined
+    nextSlot0Cap <= MAX_SLOT0_CAPACITY ? SLOT0_CAPACITY_COSTS[nextSlot0Cap] : undefined
   const canAffordSlot0Cap = slot0CapCost ? canAffordPurse(currencies, slot0CapCost) : false
-  const autoPluckGate = unlockedIds.length >= AUTO_PLUCK_MIN_UNLOCKS
-  const autoPluckSlotsToOffer = autoPluckGate
-    ? Array.from({ length: slotCount }, (_, i) => i)
-        .filter((i) => !autoPluckSlots.has(i))
-        .slice(0, 1)
-    : []
+  const autoPluckSlotsToOffer = Array.from(
+    { length: activeStation.slotCount },
+    (_, i) => i,
+  )
+    .filter((i) => !activeStation.autoPluckSlots.has(i))
+    .slice(0, 1)
 
-  // Yield candidate: among every unlocked note's next-level upgrade, surface
-  // only the most promising — affordable first, then closest to affordable,
-  // then cheapest by level. Gated until the diatonic circle is complete so
-  // the early game stays focused on unlocks/slots/auto-plucks — once you've
-  // closed C→G→D→A→E→B→F→C, yield becomes the "now deepen each note" layer.
+  // Yield candidate: among the active station's in-key partials, surface
+  // the most promising next-level upgrade. Per the design, yield upgrades
+  // also expand the station's exportable subset, so this is the lever
+  // that grows Stage-1 cargo and unlocks Stage-2 emission.
   type YieldOption = {
     id: BodyId
     lvl: number
     cost: CurrencyPurse
     costNote: BodyId
-    gateUnlocked: boolean
     progress: number
     affordable: boolean
   }
-  const yieldPanelUnlocked = UNLOCK_LADDER.every((id) => unlockedIds.includes(id))
-  const yieldOptions: YieldOption[] = yieldPanelUnlocked
-    ? unlockedIds.map((id) => {
-        const lvl = noteYieldLvls[id] ?? 0
-        const cost = noteYieldCost(id, lvl)
-        const costNote = FIFTH_NEXT[id]
-        const gateUnlocked = unlockedIds.includes(costNote)
-        const progress = gateUnlocked ? costProgress(currencies, cost) : 0
-        const affordable = gateUnlocked && canAffordPurse(currencies, cost)
-        return { id, lvl, cost, costNote, gateUnlocked, progress, affordable }
-      })
-    : []
+  const yieldOptions: YieldOption[] = activeInKey.map((id) => {
+    const lvl = activeStation.noteYieldLvls[id] ?? 0
+    const cost = noteYieldCost(id, lvl)
+    const costNote = FIFTH_NEXT[id]
+    const progress = costProgress(currencies, cost)
+    const affordable = canAffordPurse(currencies, cost)
+    return { id, lvl, cost, costNote, progress, affordable }
+  })
   const visibleYieldOption: YieldOption | undefined = [...yieldOptions]
     .sort((a, b) => {
       if (a.affordable !== b.affordable) return a.affordable ? -1 : 1
-      if (a.gateUnlocked !== b.gateUnlocked) return a.gateUnlocked ? -1 : 1
       if (a.progress !== b.progress) return b.progress - a.progress
       return a.lvl - b.lvl
     })[0]
 
-  // Aggregate every visible buy that's currently affordable, in display
-  // order. Feeds both the scroll cue under the currencies panel and the
-  // tiny "this purse is contributing to a ready buy" dot on the chips
-  // themselves — same source of truth, two views.
+  // Cargo manifest for a launch from `sourceId`: 1 unit of each currency
+  // the source can export and the purse can pay for. Returns null when
+  // the station isn't Stage-1 graduated or when nothing in the purse
+  // matches the exportable subset — the launch button is disabled in
+  // either case.
+  const buildCargo = useCallback(
+    (sourceId: BodyId): CurrencyPurse | null => {
+      const s = stations[sourceId]
+      if (!s.stage1) return null
+      const cargo: CurrencyPurse = {}
+      for (const id of s.exportable) {
+        if ((currencies[id] ?? 0) >= 1) cargo[id] = 1
+      }
+      if (Object.keys(cargo).length === 0) return null
+      return cargo
+    },
+    [stations, currencies],
+  )
+
+  const cargoForActive = buildCargo(activeStationId)
+
+  // Aggregate every visible buy that's currently affordable.
   type ReadyBuy = { label: string; costKeys: CurrencyKey[] }
   const readyBuys: ReadyBuy[] = []
-  for (const id of nextUnlocks) {
-    const cost = UNLOCK_COSTS[id]
-    if (canAffordPurse(currencies, cost)) {
-      readyBuys.push({
-        label: `Unlock ${id}`,
-        costKeys: (Object.keys(cost) as CurrencyKey[]).filter((k) => (cost[k] ?? 0) > 0),
-      })
-    }
-  }
   if (nextSlotCost && canAffordSlot) {
     readyBuys.push({
       label: `Slot ${nextSlotIdx}`,
@@ -971,17 +1104,31 @@ function App() {
     progressRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
-  const onLaunch = useCallback((body: Body) => {
-    if (!armedRef.current[body.id]) return
-    if (probesRef.current.has(body.id)) return
-    probesRef.current.set(body.id, { startMs: performance.now() })
-    launchRequestRef.current = body.id
-    setFlying((prev) => {
-      const next = new Set(prev)
-      next.add(body.id)
-      return next
-    })
-  }, [])
+  // Launch from the active station to `body`. Customs gate: the source
+  // must be Stage-1, the route's proximity window must be open, the
+  // purse must cover the cargo manifest. The cargo is deducted from the
+  // source's purse on launch and credited to the destination on arrival.
+  const onLaunch = useCallback(
+    (body: Body) => {
+      if (!armedRef.current[body.id]) return
+      if (probesRef.current.has(body.id)) return
+      const cargo = buildCargo(activeStationId)
+      if (!cargo) return
+      if (!spendIfAffordable(cargo)) return
+      probesRef.current.set(body.id, {
+        startMs: performance.now(),
+        source: activeStationId,
+        cargo,
+      })
+      launchRequestRef.current = body.id
+      setFlying((prev) => {
+        const next = new Set(prev)
+        next.add(body.id)
+        return next
+      })
+    },
+    [activeStationId, buildCargo, spendIfAffordable],
+  )
 
   const visibleNoteCurrencies = NOTE_CURRENCIES.filter(
     (k) => seenCurrencies.has(k) || (currencies[k] ?? 0) > 0,
@@ -1013,13 +1160,15 @@ function App() {
     }
   }
 
+  const launchTargets = BODIES.filter((b) => b.id !== activeStationId)
+
   return (
     <main>
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
-          : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
+          ? `Launching from ${activeBody.name} (${activeBody.id}). Consonant routes arm easily; the tritone is rare.`
+          : `Resonator · station ${activeBody.id} · in-key partials ${activeInKey.join(' · ')}`}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
         <button
@@ -1041,6 +1190,31 @@ function App() {
           Resonator
         </button>
       </nav>
+      {unlockedStations.length > 1 && (
+        <ul className="station-row" role="list" aria-label="Stations">
+          {unlockedStations.map((b) => {
+            const st = stations[b.id]
+            const isActive = b.id === activeStationId
+            const badge = st.stage2 ? '✦' : st.stage1 ? '◇' : ''
+            return (
+              <li key={b.id}>
+                <button
+                  type="button"
+                  className={`station-chip${isActive ? ' on' : ''}`}
+                  style={{ ['--chip-color' as string]: PAD_COLORS[b.id] ?? 'var(--text)' }}
+                  onClick={() => setActiveStationId(b.id)}
+                  aria-pressed={isActive}
+                  title={`Switch to ${b.name} station`}
+                >
+                  <span className="station-chip-key">{b.id}</span>
+                  <span className="station-chip-name">{b.name}</span>
+                  {badge && <span className="station-chip-badge">{badge}</span>}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
       <section className="currencies-panel" aria-label="Currencies">
         <ul className="cur-row cur-notes" role="list" aria-label="Note currencies">
           {visibleNoteCurrencies.length === 0 ? (
@@ -1164,12 +1338,29 @@ function App() {
           className="orbit"
           aria-label="Seven bodies on a diatonic wheel"
         />
+        {!activeStation.stage1 ? (
+          <p className="launch-gate">
+            Graduate <strong>{activeBody.id}</strong> station (Stage 1: all slots unlocked + auto-pluck on slot 1)
+            to enable exports. Until then no probes ship from {activeBody.name}.
+          </p>
+        ) : !cargoForActive ? (
+          <p className="launch-gate">
+            Stage 1 graduated. Mint at least one unit of{' '}
+            {Array.from(activeStation.exportable).join(' / ')} to load a probe.
+          </p>
+        ) : (
+          <p className="launch-cargo" aria-label="Cargo manifest">
+            Cargo · {Object.keys(cargoForActive).join(' · ')}
+            {activeStation.stage2 && <span className="emission-badge"> · ✦ emitting</span>}
+          </p>
+        )}
         <ul className="tiles" role="list">
-          {TARGETS.map((body) => (
+          {launchTargets.map((body) => (
             <li key={body.id}>
               <PlanetTile
                 body={body}
-                armed={armed[body.id] ?? false}
+                interval={intervalBetween(activeBody, body)}
+                armed={!!armed[body.id] && !!cargoForActive}
                 flying={flying.has(body.id)}
                 onLaunch={() => onLaunch(body)}
                 onLongPress={() => setUpgradeFor(body)}
@@ -1184,17 +1375,21 @@ function App() {
       {tab === 'harvest' && (
         <>
           <HarvestStage
-            unlockedIds={unlockedIds}
-            slots={slots}
-            slotCount={slotCount}
+            key={activeStationId}
+            station={activeBody}
+            slots={activeStation.slots}
+            slotCount={activeStation.slotCount}
             slotCapacities={slotCapacities}
-            autoPluckSlots={autoPluckSlots}
+            autoPluckSlots={activeStation.autoPluckSlots}
             noteYieldMul={noteYieldMul}
             onSlotChange={handleSlotChange}
             onEarn={earn}
+            stage1={activeStation.stage1}
+            stage2={activeStation.stage2}
+            exportable={activeStation.exportable}
           />
           <section ref={progressRef} className="resonator-progress" aria-label="Progression">
-            {anyAutoPluck && visibleIdleEntries.length > 0 && (
+            {visibleIdleEntries.length > 0 && (
               <div className="prog-section prog-idle" aria-label="Idle rate">
                 <h3 className="prog-h">
                   <span className="prog-h-label">Idle</span>
@@ -1214,57 +1409,15 @@ function App() {
                 </p>
               </div>
             )}
-            {(nextUnlocks.length > 0 ||
-              nextSlotCost ||
+            {(nextSlotCost ||
               slot0CapCost ||
               autoPluckSlotsToOffer.length > 0) && (
               <div className="prog-section prog-unlocks">
                 <h3 className="prog-h">
                   <span className="prog-h-label">Next</span>
-                  <span className="prog-h-sub">unlock new pieces of the resonator</span>
+                  <span className="prog-h-sub">unlock new pieces of the {activeBody.id} resonator</span>
                 </h3>
                 <ul className="unlocks" role="list">
-                  {nextUnlocks.map((id, i) => {
-                    const cost = UNLOCK_COSTS[id]
-                    const affordable = canAffordPurse(currencies, cost)
-                    const progress = costProgress(currencies, cost)
-                    const color = PAD_COLORS[id] ?? 'var(--accent)'
-                    return (
-                      <li
-                        key={id}
-                        className={`unlock unlock-note${i === 0 ? ' next' : ''}${affordable ? ' affordable' : ''}`}
-                        style={{ ['--chip-color' as string]: color }}
-                      >
-                        <header className="unlock-head">
-                          <span className="unlock-kind">Note</span>
-                          <span className="unlock-title">
-                            <span
-                              className="unlock-swatch"
-                              aria-hidden="true"
-                              style={{ background: color }}
-                            />
-                            {id}
-                          </span>
-                          {affordable && <ReadyBadge />}
-                        </header>
-                        <CostChips cost={cost} purse={currencies} />
-                        {!affordable && <ShortHint cost={cost} purse={currencies} />}
-                        <span
-                          className="unlock-progress"
-                          style={{ ['--p' as string]: progress.toFixed(3) }}
-                          aria-hidden="true"
-                        />
-                        <button
-                          type="button"
-                          className="unlock-btn"
-                          disabled={!affordable}
-                          onClick={() => handleUnlock(id)}
-                        >
-                          Unlock {id}
-                        </button>
-                      </li>
-                    )
-                  })}
                   {nextSlotCost && (
                     <li
                       className={`unlock unlock-slot next${canAffordSlot ? ' affordable' : ''}`}
@@ -1307,7 +1460,7 @@ function App() {
                       <header className="unlock-head">
                         <span className="unlock-kind">Stack</span>
                         <span className="unlock-title">
-                          Slot 1 · {slot0Capacity} → {nextSlot0Cap}
+                          Slot 1 · {activeStation.slot0Capacity} → {nextSlot0Cap}
                         </span>
                         {canAffordSlot0Cap && <ReadyBadge />}
                       </header>
@@ -1387,7 +1540,7 @@ function App() {
                     return (
                       <li
                         key={opt.id}
-                        className={`upgrade upgrade-note${opt.gateUnlocked ? '' : ' locked'}${opt.affordable ? ' affordable' : ''}`}
+                        className={`upgrade upgrade-note${opt.affordable ? ' affordable' : ''}`}
                         style={{ ['--chip-color' as string]: color }}
                       >
                         <header className="upgrade-head-row">
@@ -1405,14 +1558,8 @@ function App() {
                           <span className="upgrade-arrow">→</span>
                           <span className="upgrade-mul upgrade-mul-next">×{nextMul.toFixed(2)}</span>
                         </div>
-                        {opt.gateUnlocked ? (
-                          <CostChips cost={opt.cost} purse={currencies} />
-                        ) : (
-                          <span className="upgrade-locked-msg">
-                            unlock <strong>{opt.costNote}</strong> first to upgrade
-                          </span>
-                        )}
-                        {opt.gateUnlocked && !opt.affordable && (
+                        <CostChips cost={opt.cost} purse={currencies} />
+                        {!opt.affordable && (
                           <ShortHint cost={opt.cost} purse={currencies} />
                         )}
                         <span

@@ -6,13 +6,17 @@ const LONG_PRESS_MS = 420
 
 type Props = {
   body: Body
+  // Interval from the current source station to this body. The body's
+  // intrinsic intervalLabel is always relative to C/Earth; this prop
+  // overrides it so the label tracks the active launch station.
+  interval?: string
   armed: boolean
   flying: boolean
   onLaunch: () => void
   onLongPress: () => void
 }
 
-export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props) {
+export function PlanetTile({ body, interval, armed, flying, onLaunch, onLongPress }: Props) {
   const timerRef = useRef<number | null>(null)
   const longFiredRef = useRef(false)
   const [pressing, setPressing] = useState(false)
@@ -79,7 +83,7 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
         <span className="tile-roman">{body.romanNumeral}</span>
       </span>
       <span className="tile-name">{body.name}</span>
-      <span className="tile-interval">{body.intervalLabel}</span>
+      <span className="tile-interval">{interval ?? body.intervalLabel}</span>
       <span className="tile-status" aria-hidden="true">
         {flying ? 'in transit' : armed ? 'window open' : '—'}
       </span>
