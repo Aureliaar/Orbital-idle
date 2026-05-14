@@ -5,9 +5,12 @@ import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { BodyId } from './bodies'
 import {
   type ChordId,
+  MELODY,
   type MoonId,
   MOONS,
+  PHRASE_PERIOD_S,
   playTone,
+  REST,
   type Spin,
 } from './chord'
 import { HarvestStage } from './HarvestStage'
@@ -151,6 +154,17 @@ const CHORD_COLORS: Record<ChordId, string> = {
 // fires, so the eye catches the synchronization with the audio.
 const FIRE_FLASH_MS = 380
 
+// Melody comet — single body on a larger outer orbit, sharing the LH
+// phrase period. Fires the next pitch of MELODY as it crosses each
+// of N evenly-spaced stops. Spin and base phase match the i ring.
+const COMET_SPIN: Spin = 1
+const COMET_BASE_PHASE = 0
+const COMET_COLOR = '#ff7e3d'
+const COMET_GAIN = 0.09
+const COMET_RING_S = 0.7
+// Trail length in seconds of recent history; older points fade out.
+const COMET_TRAIL_S = 0.9
+
 // Did `fireAt` get crossed between `last` and `curr` in the direction
 // of `spin`? Both `last` and `curr` are in [0, 1).
 const crossed = (last: number, curr: number, fireAt: number, spin: Spin): boolean => {
@@ -274,6 +288,13 @@ function App() {
   // performance.now() of the most recent fire per moon, for the
   // enlarge-and-fade flash when it crosses perihelion.
   const fireFlashRef = useRef<Map<MoonId, number>>(new Map())
+  // Last melody-stop index occupied by the comet; firing happens on
+  // sector change.
+  const cometStopRef = useRef<number | undefined>(undefined)
+  // performance.now() of the comet's most recent stop entry.
+  const cometFlashRef = useRef<number>(-Infinity)
+  // Comet trail: timestamped (x, y) samples, oldest first.
+  const cometTrailRef = useRef<{ x: number; y: number; t: number }[]>([])
   const tabRef = useRef<Tab>(tab)
 
   useEffect(() => {
@@ -305,6 +326,7 @@ function App() {
       // period; chord identity decides which ring a moon rides on.
       const innerR = minDim * 0.23
       const outerR = minDim * 0.38
+      const cometR = minDim * 0.47
       const radiusOf = (chord: ChordId) => (chord === 'i' ? innerR : outerR)
 
       const styles = getComputedStyle(document.documentElement)
@@ -334,6 +356,28 @@ function App() {
         playTone(a!, moon.pitch)
         fireFlashRef.current.set(moon.id, now)
       }
+
+      // Comet: continuous melody pass on a faster orbit. Computes its
+      // current stop index from phase; firing happens when the stop
+      // changes (including the first frame, undefined → 0+).
+      const cometPhase = normPhase((COMET_SPIN * t) / PHRASE_PERIOD_S + COMET_BASE_PHASE)
+      const cometAngle = cometPhase * 2 * Math.PI
+      const cometX = cx + Math.cos(cometAngle) * cometR
+      const cometY = cy + Math.sin(cometAngle) * cometR
+      const cometStop = Math.floor(cometPhase * MELODY.length) % MELODY.length
+      const lastStop = cometStopRef.current
+      cometStopRef.current = cometStop
+      if (lastStop !== cometStop && audioReady) {
+        const note = MELODY[cometStop]
+        if (note.pitch !== REST) {
+          playTone(a!, note.pitch, { gain: COMET_GAIN, ringS: COMET_RING_S })
+        }
+        cometFlashRef.current = now
+      }
+      const trail = cometTrailRef.current
+      trail.push({ x: cometX, y: cometY, t: now })
+      const trailCutoff = now - COMET_TRAIL_S * 1000
+      while (trail.length > 0 && trail[0].t < trailCutoff) trail.shift()
 
       // --- Render ---
 
@@ -372,6 +416,36 @@ function App() {
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText('A', cx, cy)
+
+      // Comet trail — fading dots along recent positions.
+      ctx.fillStyle = COMET_COLOR
+      for (const sample of trail) {
+        const age = (now - sample.t) / (COMET_TRAIL_S * 1000)
+        ctx.globalAlpha = 0.55 * Math.max(0, 1 - age)
+        ctx.beginPath()
+        ctx.arc(sample.x, sample.y, 2.2, 0, 2 * Math.PI)
+        ctx.fill()
+      }
+      ctx.globalAlpha = 1
+
+      // Comet body, with a halo flash on note fire.
+      {
+        const flashAge = (now - cometFlashRef.current) / FIRE_FLASH_MS
+        const flash = Math.max(0, 1 - flashAge)
+        const r = 7 + flash * 6
+        if (flash > 0) {
+          ctx.fillStyle = COMET_COLOR
+          ctx.globalAlpha = 0.28 * flash
+          ctx.beginPath()
+          ctx.arc(cometX, cometY, r + 8, 0, 2 * Math.PI)
+          ctx.fill()
+          ctx.globalAlpha = 1
+        }
+        ctx.fillStyle = COMET_COLOR
+        ctx.beginPath()
+        ctx.arc(cometX, cometY, r, 0, 2 * Math.PI)
+        ctx.fill()
+      }
 
       // Six moons — three per ring.
       for (const { moon, angle, r: ringR } of positions) {
@@ -413,9 +487,12 @@ function App() {
   // Clear the per-moon phase tracker. With staggered moons we can't use
   // a "prime to 0.999" trick to force an immediate fire — that would
   // fire every moon at once. The next frame will set fresh `last`
-  // values and subsequent frames detect real wraps.
+  // values and subsequent frames detect real wraps. The comet stop is
+  // also cleared so it re-fires the current stop on the first frame.
   const primePhases = useCallback(() => {
     phaseRef.current.clear()
+    cometStopRef.current = undefined
+    cometTrailRef.current = []
   }, [])
 
   useEffect(() => {
@@ -637,7 +714,7 @@ function App() {
       <h1>Orbital</h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Für Elise · inner i ring spins one way, outer V ring the other; they fire on opposite sides'
+          ? 'Für Elise · two chord rings carry the i/V arpeggios; a comet outside traces the melody'
           : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">

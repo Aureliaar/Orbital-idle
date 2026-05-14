@@ -85,19 +85,58 @@ export const MOONS: readonly Moon[] = SCORE.map((m, i) => {
   }
 })
 
-// --- Audio synthesis ----------------------------------------------------
+// --- Melody: stylized Für Elise right hand ----------------------------
+//
+// The famous opening 9 sixteenth notes (E5–D#5–E5–D#5–E5–B4–D5–C5–A4)
+// plus 3 rests, evenly spaced around a comet's orbit. The comet shares
+// the LH phrase period (4 s), so each step is 1/3 s — about a sixteenth
+// note at this tempo, twice as fast as the LH moons.
+
+const A4 = 440.0
+const B4 = 493.88
+const C5 = 523.25
+const D5 = 587.33
+const DS5 = 622.25
+const E5 = 659.25
+
+export const REST = 0
+
+export type MelodyStop = { pitch: number; label: string }
+
+export const MELODY: readonly MelodyStop[] = [
+  { pitch: E5,   label: 'E5'  },
+  { pitch: DS5,  label: 'D#5' },
+  { pitch: E5,   label: 'E5'  },
+  { pitch: DS5,  label: 'D#5' },
+  { pitch: E5,   label: 'E5'  },
+  { pitch: B4,   label: 'B4'  },
+  { pitch: D5,   label: 'D5'  },
+  { pitch: C5,   label: 'C5'  },
+  { pitch: A4,   label: 'A4'  },
+  { pitch: REST, label: '·'   },
+  { pitch: REST, label: '·'   },
+  { pitch: REST, label: '·'   },
+]
 
 const HARMONIC_COUNT = 6
-const RING_DURATION_S = 1.5
-const PLUCK_GAIN = 0.18
+const DEFAULT_RING_S = 1.5
+const DEFAULT_GAIN = 0.18
 
-export function playTone(audio: AudioGraph, fundamental: number, when?: number): void {
+export type PlayToneOpts = {
+  when?: number
+  gain?: number
+  ringS?: number
+}
+
+export function playTone(audio: AudioGraph, fundamental: number, opts?: PlayToneOpts): void {
   const { ctx, filter } = audio
-  const start = when ?? ctx.currentTime
+  const start = opts?.when ?? ctx.currentTime
+  const gain = opts?.gain ?? DEFAULT_GAIN
+  const ringS = opts?.ringS ?? DEFAULT_RING_S
   const env = ctx.createGain()
   env.gain.setValueAtTime(0, start)
-  env.gain.linearRampToValueAtTime(PLUCK_GAIN, start + 0.005)
-  env.gain.exponentialRampToValueAtTime(0.0001, start + RING_DURATION_S)
+  env.gain.linearRampToValueAtTime(gain, start + 0.005)
+  env.gain.exponentialRampToValueAtTime(0.0001, start + ringS)
   env.connect(filter)
 
   const partials = harmonicSeries(fundamental, HARMONIC_COUNT, defaultAmp)
@@ -109,12 +148,12 @@ export function playTone(audio: AudioGraph, fundamental: number, when?: number):
     g.gain.value = h.amp
     o.connect(g).connect(env)
     o.start(start)
-    o.stop(start + RING_DURATION_S + 0.05)
+    o.stop(start + ringS + 0.05)
   }
 
   // env.disconnect() once the ring finishes — scheduled on wall clock,
   // since `start` is in audio-context time.
-  const releaseInS = Math.max(0, start - ctx.currentTime) + RING_DURATION_S + 0.2
+  const releaseInS = Math.max(0, start - ctx.currentTime) + ringS + 0.2
   window.setTimeout(() => {
     try {
       env.disconnect()
