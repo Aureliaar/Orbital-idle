@@ -10,8 +10,11 @@ Tiny project. Read `DESIGN.md` first — it sets the premise (music theory **is*
 - `npm run lint` — eslint
 - `npm run preview` — local Workers preview via `wrangler dev`
 - `npm run deploy` — `wrangler deploy` to Cloudflare Workers
+- `npm run shoot` — push, wait, then screenshot the Cloudflare branch preview to `tmp/preview.png`
 
-Run `npm run build` and `npm run lint` before claiming a change works. The visuals (canvas animation, future audio) can't be verified from a CLI — if you can't open a browser, say so explicitly rather than claim success.
+Run `npm run build` and `npm run lint` before claiming a change works.
+
+For visual verification: push the branch, then `npm run shoot` and `Read` `tmp/preview.png`. This catches static-frame bugs (layout, colors, what's on the canvas this tick). It does NOT verify animation smoothness or audio — if a change touches those, say so explicitly rather than claim success on the strength of one frame.
 
 After pushing changes to a branch, always paste the Cloudflare Workers branch preview URL for that branch (see slug rules below) so it can be opened in a browser.
 
