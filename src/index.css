@@ -1,27 +1,41 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Observatory tokens — aged parchment, iron-gall ink, engraver's red.
+     See applied-to-orbital.jsx · ObsTokenMap for the concordance with the
+     pre-reskin palette. The canvas in App.tsx reads --border / --accent /
+     --accent-bg / --text / --text-h via getComputedStyle, so all four must
+     be plain hex / rgba strings (not color-mix()) to stay valid fillStyles. */
+  --bg: #c9b487;            /* parchment page tone */
+  --bg2: #b89e6a;           /* shadowed edge */
+  --paper: #d6c293;         /* raised highlight / inset panel */
+  --text: #3d2c1a;          /* walnut body text */
+  --text-h: #1a120a;        /* iron-gall ink for headings */
+  --text-3: #6b5536;        /* faded ink for captions */
+  --border: rgba(26, 18, 10, 0.42);    /* 0.5pt ink rule */
+  --border-soft: rgba(26, 18, 10, 0.2);
+  --rule-thin: rgba(26, 18, 10, 0.55);
+  --code-bg: #d6c293;
+  --accent: #8c2a12;        /* engraver's red */
+  --rust-soft: #b54a25;
+  --gold: #7a5a1a;
+  --accent-bg: rgba(140, 42, 18, 0.1);
+  --accent-border: rgba(140, 42, 18, 0.55);
+  --social-bg: rgba(214, 194, 147, 0.5);
+  --shadow: none;
+  --paper-tex: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0.10  0 0 0 0 0.07  0 0 0 0 0.04  0 0 0 0.32 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --sans: 'IM Fell DW Pica', 'Newsreader', Georgia, serif;
+  --heading: 'IM Fell DW Pica', 'Newsreader', Georgia, serif;
+  --display: 'IM Fell English', 'Newsreader', Georgia, serif;
+  --sc: 'IM Fell English SC', 'IM Fell English', serif;
+  --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
+  letter-spacing: 0.01em;
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
@@ -30,32 +44,11 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
 #root {
   width: 1126px;
   max-width: 100%;
   margin: 0 auto;
   text-align: center;
-  border-inline: 1px solid var(--border);
   min-height: 100svh;
   display: flex;
   flex-direction: column;
@@ -64,18 +57,20 @@
 
 body {
   margin: 0;
+  background: var(--bg);
 }
 
 h1,
 h2 {
-  font-family: var(--heading);
-  font-weight: 500;
+  font-family: var(--display);
+  font-weight: 400;
+  font-style: italic;
   color: var(--text-h);
 }
 
 h1 {
   font-size: 56px;
-  letter-spacing: -1.68px;
+  letter-spacing: 0.01em;
   margin: 32px 0;
   @media (max-width: 1024px) {
     font-size: 36px;
@@ -85,7 +80,7 @@ h1 {
 h2 {
   font-size: 24px;
   line-height: 118%;
-  letter-spacing: -0.24px;
+  letter-spacing: -0.005em;
   margin: 0 0 8px;
   @media (max-width: 1024px) {
     font-size: 20px;
@@ -99,8 +94,9 @@ code,
 .counter {
   font-family: var(--mono);
   display: inline-flex;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--text-h);
+  font-feature-settings: 'tnum';
 }
 
 code {
@@ -108,4 +104,5 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
+  border: 0.5px solid var(--border);
 }
