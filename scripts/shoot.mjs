@@ -66,6 +66,7 @@ execFileSync(
   [
     "playwright",
     "screenshot",
+    "--ignore-https-errors",
     "--wait-for-timeout",
     "1500",
     "--viewport-size",
