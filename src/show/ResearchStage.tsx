@@ -108,7 +108,7 @@ function ResearchTree({ activeProgress }: { activeProgress: number }) {
   const tierY = [40, 110, 180, 250, 320]
   const pos = (n: ResearchNode) => ({ x: colsX[n.col], y: tierY[n.tier] })
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="research-tree-svg">
       <defs>
         <pattern
           id="hatchRsch"
@@ -188,120 +188,38 @@ function ResearchTree({ activeProgress }: { activeProgress: number }) {
 export function ResearchStage({ state }: { state: ShowState }) {
   const active = RESEARCH_NODES.find((n) => n.status === 'active')
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      <div
-        style={{
-          padding: '8px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          borderBottom: `0.5px dotted ${obs.ink}55`,
-          background: obs.bg2 + '22',
-          position: 'relative',
-          zIndex: 2,
-        }}
-      >
-        <span className="sc" style={{ fontSize: 9, color: obs.ink2, letterSpacing: '0.22em' }}>
-          writ-roll
+    <div className="research-stage">
+      <div className="research-writ-strip">
+        <span className="sc research-writ-label">writ-roll</span>
+        <span className="display research-writ-amount">
+          ✎ <span className="research-writ-amount-value">{state.writs}</span>
         </span>
-        <span
-          className="display"
-          style={{
-            fontStyle: 'italic',
-            fontSize: 22,
-            color: obs.ink2,
-            lineHeight: 1,
-            marginLeft: 2,
-          }}
-        >
-          ✎ <span style={{ color: obs.ink }}>{state.writs}</span>
-        </span>
-        <span style={{ flex: 1 }} />
-        <span className="mono" style={{ fontSize: 9, color: obs.ink3 }}>
-          +0.18 ✎ / bar
-        </span>
+        <span className="research-writ-spacer" />
+        <span className="mono research-writ-rate">+0.18 ✎ / bar</span>
       </div>
 
       {active && (
-        <div style={{ padding: '10px 14px 6px', position: 'relative', zIndex: 2 }}>
-          <div className="sc" style={{ fontSize: 9, color: obs.rust, letterSpacing: '0.22em' }}>
-            Active inquiry
-          </div>
-          <div
-            style={{
-              marginTop: 4,
-              padding: '10px 12px',
-              border: `0.5px solid ${obs.rust}`,
-              background: obs.rust + '0e',
-              position: 'relative',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span
-                className="sc"
-                style={{
-                  fontSize: 8,
-                  padding: '1px 5px',
-                  background: obs.rust,
-                  color: obs.bg,
-                  letterSpacing: '0.2em',
-                }}
-              >
+        <div className="research-active-section">
+          <div className="sc research-active-header">Active inquiry</div>
+          <div className="research-active-card">
+            <div className="research-active-row">
+              <span className="sc research-active-tier-badge">
                 tier {['I', 'II', 'III', 'IV', 'V'][active.tier]} · {active.branch}
               </span>
-              <h3
-                className="display"
-                style={{ fontSize: 19, fontStyle: 'italic', lineHeight: 1, margin: 0, fontWeight: 400 }}
-              >
-                {active.title}
-              </h3>
-              <span style={{ flex: 1 }} />
-              <span className="mono" style={{ fontSize: 11, color: obs.rust }}>
+              <h3 className="display research-active-title">{active.title}</h3>
+              <span className="research-active-spacer" />
+              <span className="mono research-active-pct">
                 {Math.round(state.activeInquiryProgress * 100)}%
               </span>
             </div>
-            <div
-              className="display"
-              style={{
-                fontStyle: 'italic',
-                fontSize: 12,
-                color: obs.ink2,
-                marginTop: 2,
-                lineHeight: 1.4,
-              }}
-            >
-              {active.body}
-            </div>
-            <div
-              style={{
-                position: 'relative',
-                height: 5,
-                marginTop: 8,
-                border: `0.5px solid ${obs.ink}`,
-                background: obs.paper,
-              }}
-            >
+            <div className="display research-active-body">{active.body}</div>
+            <div className="research-active-track">
               <span
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: `${state.activeInquiryProgress * 100}%`,
-                  background: obs.rust,
-                }}
+                className="research-active-fill"
+                style={{ width: `${state.activeInquiryProgress * 100}%` }}
               />
             </div>
-            <div
-              className="mono"
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 9,
-                color: obs.ink3,
-                marginTop: 3,
-              }}
-            >
+            <div className="mono research-active-footer">
               <span>
                 ✎ {Math.round(state.activeInquiryProgress * active.cost)} / {active.cost} inscribed
               </span>
@@ -313,40 +231,18 @@ export function ResearchStage({ state }: { state: ShowState }) {
         </div>
       )}
 
-      <div style={{ padding: '6px 14px', position: 'relative', zIndex: 2 }}>
-        <div
-          className="sc"
-          style={{
-            fontSize: 9,
-            color: obs.ink2,
-            letterSpacing: '0.22em',
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}
-        >
+      <div className="research-tree-section">
+        <div className="sc research-tree-row">
           <span>Tab. I — the tree</span>
-          <span className="mono" style={{ color: obs.ink3 }}>tap a node to queue</span>
+          <span className="mono research-tree-hint">tap a node to queue</span>
         </div>
-        <div
-          style={{ marginTop: 4, background: obs.paper, border: `0.5px solid ${obs.ink}` }}
-        >
+        <div className="research-tree-frame">
           <ResearchTree activeProgress={state.activeInquiryProgress} />
         </div>
       </div>
 
-      <div
-        style={{
-          padding: '8px 18px 14px 16px',
-          position: 'relative',
-          zIndex: 2,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-        }}
-      >
-        <div className="sc" style={{ fontSize: 9, color: obs.ink2, letterSpacing: '0.22em' }}>
-          Apparatus inscribing now
-        </div>
+      <div className="research-stations-section">
+        <div className="sc research-stations-label">Apparatus inscribing now</div>
         {RESEARCH_STATION_IDS.map((id, i) => {
           const def = STATIONS[id]
           const lib = STATION_RECIPES[id]

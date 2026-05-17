@@ -4,6 +4,7 @@
 // dragging a coin is not wired (the read-only sim doesn't move
 // currencies between planets).
 
+import type { CSSProperties } from 'react'
 import { COIN_COLOR, PAD, obs } from './data'
 import { formatBarTime, type ShowState } from './state'
 
@@ -17,51 +18,21 @@ export function WheelStage({ state }: { state: ShowState }) {
   const open = openIdx >= 0 ? state.conjunctions[openIdx] : null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-      <div style={{ padding: '10px 14px 4px', position: 'relative', zIndex: 2 }}>
-        <div
-          className="sc"
-          style={{
-            fontSize: 9,
-            color: obs.ink2,
-            letterSpacing: '0.22em',
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}
-        >
+    <div className="wheel-stage">
+      <div className="wheel-header">
+        <div className="sc wheel-header-row">
           <span>Tab. I — the wheel</span>
           {open && (
-            <span className="mono" style={{ color: obs.rust }}>
+            <span className="mono wheel-header-open">
               ● conjunction open · {open.durationBars}s
             </span>
           )}
         </div>
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          padding: '0 14px',
-          position: 'relative',
-          zIndex: 2,
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            position: 'relative',
-            background: obs.paper,
-            border: `0.5px solid ${obs.ink}`,
-            aspectRatio: '1 / 1',
-            maxWidth: 360,
-            alignSelf: 'center',
-            width: '100%',
-          }}
-        >
-          <svg viewBox="0 0 350 370" style={{ width: '100%', height: '100%' }}>
+      <div className="wheel-body">
+        <div className="wheel-armillary-frame">
+          <svg viewBox="0 0 350 370" className="wheel-armillary-svg">
             <defs>
               <pattern
                 id="hatchW"
@@ -217,116 +188,49 @@ export function WheelStage({ state }: { state: ShowState }) {
         </div>
 
         {open && (
-          <div
-            style={{
-              padding: '10px 12px',
-              border: `0.5px solid ${obs.rust}`,
-              background: obs.rust + '0e',
-            }}
-          >
-            <div className="sc" style={{ fontSize: 9, color: obs.rust, letterSpacing: '0.22em' }}>
-              Shuttle · drag the coin
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr auto 1fr',
-                gap: 8,
-                marginTop: 6,
-                alignItems: 'center',
-              }}
-            >
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '6px 4px',
-                  border: `0.5px solid ${obs.ink}`,
-                  background: obs.bg,
-                }}
-              >
+          <div className="wheel-shuttle">
+            <div className="sc wheel-shuttle-header">Shuttle · drag the coin</div>
+            <div className="wheel-shuttle-grid">
+              <div className="wheel-shuttle-cell">
                 <div
-                  className="display"
-                  style={{ fontSize: 22, fontStyle: 'italic', color: PAD[open.pair[0]] }}
+                  className="display wheel-shuttle-note"
+                  style={{ '--note-color': PAD[open.pair[0]] } as CSSProperties}
                 >
                   {open.pair[0]}
                 </div>
-                <div className="mono" style={{ fontSize: 9, color: obs.ink2 }}>
-                  −3 coins
-                </div>
+                <div className="mono wheel-shuttle-amount">−3 coins</div>
               </div>
-              <span
-                className="display"
-                style={{ fontSize: 24, fontStyle: 'italic', color: obs.rust, textAlign: 'center' }}
-              >
-                ↦
-              </span>
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '6px 4px',
-                  border: `0.5px solid ${obs.ink}`,
-                  background: obs.bg,
-                }}
-              >
+              <span className="display wheel-shuttle-arrow">↦</span>
+              <div className="wheel-shuttle-cell">
                 <div
-                  className="display"
-                  style={{ fontSize: 22, fontStyle: 'italic', color: PAD[open.pair[1]] }}
+                  className="display wheel-shuttle-note"
+                  style={{ '--note-color': PAD[open.pair[1]] } as CSSProperties}
                 >
                   {open.pair[1]}
                 </div>
-                <div className="mono" style={{ fontSize: 9, color: obs.ink2 }}>
-                  +2 coins
-                </div>
+                <div className="mono wheel-shuttle-amount">+2 coins</div>
               </div>
             </div>
-            <div
-              className="mono"
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginTop: 6,
-                fontSize: 9,
-                color: obs.ink3,
-              }}
-            >
+            <div className="mono wheel-shuttle-footer">
               <span>fee · 1 coin (just intonation pays better)</span>
-              <span
-                className="display"
-                style={{
-                  fontStyle: 'italic',
-                  color: obs.bg,
-                  background: obs.ink,
-                  padding: '3px 10px',
-                }}
-              >
-                execute
-              </span>
+              <span className="display wheel-shuttle-execute">execute</span>
             </div>
           </div>
         )}
 
-        <div style={{ paddingBottom: 14 }}>
-          <div className="sc" style={{ fontSize: 9, color: obs.ink2, letterSpacing: '0.22em' }}>
-            Coming windows
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 6, overflow: 'hidden' }}>
+        <div className="wheel-windows-section">
+          <div className="sc wheel-windows-label">Coming windows</div>
+          <div className="wheel-windows-row">
             {state.conjunctions.map((c) => (
               <div
                 key={`${c.pair[0]}-${c.pair[1]}`}
-                style={{
-                  flex: 1,
-                  padding: '4px 6px',
-                  border: `0.5px solid ${c.open ? obs.rust : obs.ink + '77'}`,
-                  background: c.open ? obs.rust + '14' : obs.bg,
-                }}
+                className="wheel-window-card"
+                data-open={c.open || undefined}
               >
-                <div
-                  className="mono"
-                  style={{ fontSize: 10, color: obs.ink, fontWeight: 600 }}
-                >
+                <div className="mono wheel-window-pair">
                   {c.pair[0]}·{c.pair[1]}
                 </div>
-                <div className="mono" style={{ fontSize: 9, color: obs.ink3 }}>
+                <div className="mono wheel-window-meta">
                   {c.ratio} · {c.open ? `open ${c.durationBars}s` : formatBarTime(c.inBars)}
                 </div>
               </div>

@@ -3,6 +3,8 @@
    corner ornaments wrap the whole window, the plate itself carries the
    show. */
 
+@import './show/show.css';
+
 .show {
   position: relative;
   min-height: 100svh;
@@ -51,6 +53,88 @@
   font-feature-settings: 'tnum';
 }
 
-/* Old game CSS is gone — anything global it relied on (h1 sizing, code
-   blocks) is still set in index.css. The show stages style themselves
-   inline so this file stays slim. */
+/* ── Page chrome ────────────────────────────────────────────────── */
+
+.chrome-paper,
+.chrome-vignette,
+.chrome-frame,
+.chrome-corners {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.chrome-paper {
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+  background-image: var(--paper-tex);
+}
+
+.chrome-vignette {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 45%,
+    rgba(0, 0, 0, 0.16) 78%,
+    rgba(0, 0, 0, 0.38) 100%
+  );
+}
+
+.chrome-frame {
+  inset: 10px;
+}
+
+.chrome-frame-outer,
+.chrome-frame-inner {
+  position: absolute;
+}
+
+.chrome-frame-outer {
+  inset: 0;
+  border: 1px solid var(--text-h);
+}
+
+.chrome-frame-inner {
+  inset: 4px;
+  border: 0.5px solid var(--text-h);
+  opacity: 0.6;
+}
+
+.chrome-foxing {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+}
+
+.chrome-corner {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+}
+
+.chrome-corner[data-corner='tl'] {
+  left: 6px;
+  top: 6px;
+  transform: scale(1, 1);
+}
+
+.chrome-corner[data-corner='tr'] {
+  right: 6px;
+  top: 6px;
+  transform: scale(-1, 1);
+}
+
+.chrome-corner[data-corner='bl'] {
+  left: 6px;
+  bottom: 6px;
+  transform: scale(1, -1);
+}
+
+.chrome-corner[data-corner='br'] {
+  right: 6px;
+  bottom: 6px;
+  transform: scale(-1, -1);
+}

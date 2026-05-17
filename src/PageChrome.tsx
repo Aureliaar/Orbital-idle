@@ -11,29 +11,9 @@ const INK = '#1a120a'
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 
-function CornerOrnament({ corner, size = 60, color = INK }: { corner: Corner; size?: number; color?: string }) {
-  const transforms: Record<Corner, string> = {
-    tl: 'scale(1,1)',
-    tr: 'scale(-1,1)',
-    bl: 'scale(1,-1)',
-    br: 'scale(-1,-1)',
-  }
-  const positions: Record<Corner, { left?: number; right?: number; top?: number; bottom?: number }> = {
-    tl: { left: 6, top: 6 },
-    tr: { right: 6, top: 6 },
-    bl: { left: 6, bottom: 6 },
-    br: { right: 6, bottom: 6 },
-  }
+function CornerOrnament({ corner, color = INK }: { corner: Corner; color?: string }) {
   return (
-    <div
-      style={{
-        position: 'absolute',
-        width: size,
-        height: size,
-        transform: transforms[corner],
-        ...positions[corner],
-      }}
-    >
+    <div className="chrome-corner" data-corner={corner}>
       <svg viewBox="0 0 60 60" width="100%" height="100%">
         <g fill="none" stroke={color} strokeWidth="0.7" strokeLinecap="round">
           <path d="M 4 28 L 4 4 L 28 4" />
@@ -51,11 +31,11 @@ function CornerOrnament({ corner, size = 60, color = INK }: { corner: Corner; si
   )
 }
 
-function FrameBorder({ inset = 10, color = INK }: { inset?: number; color?: string }) {
+function FrameBorder() {
   return (
-    <div style={{ position: 'absolute', inset, pointerEvents: 'none' }}>
-      <div style={{ position: 'absolute', inset: 0, border: `1px solid ${color}` }} />
-      <div style={{ position: 'absolute', inset: 4, border: `0.5px solid ${color}`, opacity: 0.6 }} />
+    <div className="chrome-frame">
+      <div className="chrome-frame-outer" />
+      <div className="chrome-frame-inner" />
     </div>
   )
 }
@@ -80,15 +60,7 @@ function Foxing() {
     <svg
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
-      style={{
-        position: 'absolute',
-        inset: 0,
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-        opacity: 0.35,
-        mixBlendMode: 'multiply',
-      }}
+      className="chrome-foxing"
       aria-hidden="true"
     >
       {spots.map((s, i) => (
@@ -110,30 +82,11 @@ function Foxing() {
 export function PageChrome() {
   return (
     <>
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          opacity: 0.5,
-          mixBlendMode: 'multiply',
-          backgroundImage: 'var(--paper-tex)',
-        }}
-      />
+      <div aria-hidden="true" className="chrome-paper" />
       <Foxing />
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          background:
-            'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.16) 78%, rgba(0,0,0,0.38) 100%)',
-        }}
-      />
+      <div aria-hidden="true" className="chrome-vignette" />
       <FrameBorder />
-      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      <div aria-hidden="true" className="chrome-corners">
         <CornerOrnament corner="tl" />
         <CornerOrnament corner="tr" />
         <CornerOrnament corner="bl" />
