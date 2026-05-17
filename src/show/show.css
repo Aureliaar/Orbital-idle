@@ -952,3 +952,80 @@
   color: var(--text);
   letter-spacing: 0.22em;
 }
+
+/* ── Mobile type bump ───────────────────────────────────────────── */
+/* The desktop scale is the engraver's-print aesthetic (8–11 px micro
+   labels). On phones those collapse into illegibility, so push the
+   smallest tier up by ~2 px without losing the look. */
+
+@media (max-width: 600px) {
+  .show-crown-meta,
+  .attention-bar-labels,
+  .stage-tab-eyebrow,
+  .pit-purse-label,
+  .station-kind,
+  .station-apparatus-cycle,
+  .slot-rack-header,
+  .station-meter-labels,
+  .station-tend-tab,
+  .wheel-windows-label,
+  .wheel-shuttle-header,
+  .research-writ-label,
+  .research-active-header,
+  .research-active-tier-badge,
+  .research-stations-label {
+    font-size: 10px;
+  }
+
+  .condition-badge,
+  .slot-chip-empty-label,
+  .slot-chip-locked-label,
+  .slot-chip-qty,
+  .slot-chip-recipe,
+  .slot-chip-starve,
+  .pit-add-station-cost,
+  .station-relight-btn,
+  .wheel-header-row,
+  .wheel-shuttle-amount,
+  .wheel-shuttle-footer,
+  .wheel-window-meta,
+  .research-writ-rate,
+  .research-tree-row,
+  .research-active-footer,
+  .research-active-body {
+    font-size: 11px;
+  }
+
+  .coin-chip {
+    font-size: 13px;
+    padding: 3px 7px;
+  }
+
+  .coin-chip[data-size='lg'] {
+    font-size: 14px;
+    padding: 4px 9px;
+  }
+
+  .show-crown-subtitle {
+    font-size: 13px;
+  }
+
+  .wheel-window-pair,
+  .research-active-pct {
+    font-size: 12px;
+  }
+
+  /* The pit station row had asymmetric padding designed for a desktop
+     plate; tighten on phones so the slot rack has more breathing room. */
+  .pit-stations {
+    padding: 12px 12px 16px 12px;
+  }
+
+  .station-card {
+    padding: 10px 10px 12px;
+  }
+
+  .station-card-badge {
+    left: -6px;
+  }
+}

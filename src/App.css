@@ -14,6 +14,12 @@
   align-items: center;
 }
 
+@media (max-width: 600px) {
+  .show {
+    padding: 14px 6px 18px;
+  }
+}
+
 .show-inner {
   position: relative;
   z-index: 2;
@@ -81,6 +87,31 @@
 
 .chrome-frame {
   inset: 10px;
+}
+
+@media (max-width: 600px) {
+  .chrome-frame {
+    inset: 2px;
+  }
+  .chrome-frame-inner {
+    inset: 3px;
+  }
+  .chrome-corner[data-corner='tl'],
+  .chrome-corner[data-corner='bl'] {
+    left: 2px;
+  }
+  .chrome-corner[data-corner='tr'],
+  .chrome-corner[data-corner='br'] {
+    right: 2px;
+  }
+  .chrome-corner[data-corner='tl'],
+  .chrome-corner[data-corner='tr'] {
+    top: 2px;
+  }
+  .chrome-corner[data-corner='bl'],
+  .chrome-corner[data-corner='br'] {
+    bottom: 2px;
+  }
 }
 
 .chrome-frame-outer,
