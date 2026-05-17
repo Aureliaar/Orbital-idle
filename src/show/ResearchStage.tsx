@@ -249,16 +249,19 @@ export function ResearchStage({ state }: { state: ShowState }) {
           if (!def || !lib) return null
           const fakeState = {
             id,
+            role: 'ref' as const,
             slots: [
-              { state: 'active' as const, recipeId: lib[0].id, cycle: id === 'scriptorium' ? 0.42 : 0.71 },
-              ...(id === 'camera' ? [{ state: 'empty' as const, cycle: 0 }] : []),
+              { state: 'installed' as const, moduleId: undefined },
+              ...(id === 'camera' ? [{ state: 'empty' as const }] : []),
             ],
             capacity: id === 'camera' ? 2 : 1,
             heat: id === 'scriptorium' ? 0.82 : 0.39,
+            cycle: id === 'scriptorium' ? 0.42 : 0.71,
+            committed: true,
             auto: id === 'camera',
             alarm: false,
           }
-          return <StationCard key={id} idx={i + 1} state={fakeState} upgrades={state.upgrades} />
+          return <StationCard key={id} idx={i + 1} state={fakeState} showState={state} />
         })}
       </div>
     </div>

@@ -1,25 +1,27 @@
-// Station card + supporting atoms (HeatMeter, ConditionBadge, SlotChip,
-// SlotRack). Ported from production-stations.jsx. The card layout is
-// mobile-first but stretches fine on web.
+// Station card + supporting atoms (HeatMeter, ConditionBadge, RoleBadge,
+// ModuleChip, ModuleRack). Each pit station has a role (gen or ref)
+// toggled from the header, and a row of module slots that the player
+// cycles through with taps. Heat / cycle progress is station-wide
+// because the recipe is role-derived.
 
 import type { CSSProperties } from 'react'
 import { Apparatus } from './Apparatus'
 import {
   COIN_COLOR,
-  KIND_META,
+  MODULES,
   STATION_MAX_CAPACITY,
   STATIONS,
   obs,
-  recipeLabel,
   type Coin,
-  type Recipe,
+  type ModuleId,
+  type StationRole,
 } from './data'
+import type { Condition, ShowState, Slot, StationState } from './state'
 import {
-  STATION_CAPACITY,
-  STATION_RECIPES,
-} from './data'
-import type { Condition, Slot, StationState, Upgrades } from './state'
-import { conditionOf, effectiveRecipe } from './state'
+  conditionOf,
+  effectiveStationRecipe,
+  moduleCost,
+} from './state'
 
 const CONDITION_GLYPH: Record<Condition, string> = {
   warm: '●',
@@ -60,26 +62,35 @@ export function HeatMeter({ value, condition }: { value: number; condition: Cond
   )
 }
 
-function SlotChip({
+const ROLE_GLYPH: Record<StationRole, string> = { gen: '◇', ref: '△' }
+const ROLE_LABEL: Record<StationRole, string> = { gen: 'gen · C', ref: 'ref · ∮' }
+
+function RoleBadge({ role, onToggle }: { role: StationRole; onToggle?: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!onToggle}
+      className="role-badge"
+      data-role={role}
+      title="tap to flip role"
+    >
+      <span className="role-badge-glyph">{ROLE_GLYPH[role]}</span>
+      <span className="sc role-badge-label">{ROLE_LABEL[role]}</span>
+      {onToggle && <span className="role-badge-flip">⇄</span>}
+    </button>
+  )
+}
+
+function ModuleChip({
   slot,
-  onSwap,
+  nextCost,
+  onCycle,
 }: {
-  slot: Slot & { recipe?: Recipe }
-  onSwap?: () => void
+  slot: Slot
+  nextCost: number | null
+  onCycle?: () => void
 }) {
-  if (!slot || slot.state === 'empty') {
-    return (
-      <button
-        type="button"
-        onClick={onSwap}
-        disabled={!onSwap}
-        className="slot-chip"
-        data-state="empty"
-      >
-        <span className="sc slot-chip-empty-label">+ slot</span>
-      </button>
-    )
-  }
   if (slot.state === 'locked') {
     return (
       <div className="slot-chip" data-state="locked">
@@ -87,104 +98,98 @@ function SlotChip({
       </div>
     )
   }
-  const r = slot.recipe
-  if (!r) return null
-  const c = COIN_COLOR[r.out.note] || obs.ink
-  const active = slot.state === 'active'
-  const starved = slot.state === 'starved'
+  if (slot.state === 'empty' || !slot.moduleId) {
+    return (
+      <button
+        type="button"
+        onClick={onCycle}
+        disabled={!onCycle}
+        className="slot-chip"
+        data-state="empty"
+      >
+        <span className="sc slot-chip-empty-label">+ module</span>
+        {nextCost != null && (
+          <span className="mono slot-chip-cost">{nextCost} ∮</span>
+        )}
+      </button>
+    )
+  }
+  const m = MODULES[slot.moduleId]
+  const inactive = slot.state === 'inactive'
   return (
     <button
       type="button"
-      onClick={onSwap}
-      disabled={!onSwap}
+      onClick={onCycle}
+      disabled={!onCycle}
       className="slot-chip"
-      data-state={slot.state}
-      style={{ '--slot-color': c } as CSSProperties}
+      data-state={inactive ? 'inactive' : 'installed'}
+      style={{ '--slot-color': obs.gold } as CSSProperties}
     >
       <span className="slot-chip-corner" />
       <div className="slot-chip-row">
-        <span className="display slot-chip-note">{r.out.note}</span>
-        {r.out.qty > 1 && <span className="mono slot-chip-qty">×{r.out.qty}</span>}
+        <span className="display slot-chip-module">{m.name}</span>
         <span className="slot-chip-spacer" />
-        {active && !starved && <span className="slot-chip-pulse" />}
-        {starved && <span className="sc slot-chip-starve">!</span>}
+        {inactive && <span className="sc slot-chip-inactive">idle</span>}
       </div>
-      <div className="mono slot-chip-recipe">{recipeLabel(r)}</div>
-      <span className="slot-chip-cycle" aria-hidden="true">
-        <span
-          className="slot-chip-cycle-fill"
-          style={{ width: `${Math.min(1, slot.cycle) * 100}%` }}
-        />
-      </span>
+      <div className="mono slot-chip-recipe">
+        {m.blurb}
+        {m.roleLock && <span className="slot-chip-rolelock"> · {m.roleLock}</span>}
+      </div>
     </button>
   )
 }
 
-function SlotRack({
-  slots,
-  capacity,
-  max,
-  dense = false,
-  stationId,
-  upgrades,
-  onSwapSlot,
+function ModuleRack({
+  station,
+  showState,
+  onCycleSlot,
 }: {
-  slots: Slot[]
-  capacity: number
-  max: number
-  dense?: boolean
-  stationId: string
-  upgrades: Upgrades
-  onSwapSlot?: (slot: number) => void
+  station: StationState
+  showState: ShowState
+  onCycleSlot?: (slot: number) => void
 }) {
-  const lib = STATION_RECIPES[stationId] ?? []
-  const resolveRecipe = (slot: Slot): Recipe | undefined => {
-    if (!slot.recipeId) return undefined
-    const eff = effectiveRecipe(stationId, slot.recipeId, upgrades)
-    return eff ?? lib.find((r) => r.id === slot.recipeId)
-  }
-
-  const filled: Array<Slot & { recipe?: Recipe }> = slots
-    .slice(0, capacity)
-    .map((s) => ({ ...s, recipe: resolveRecipe(s) }))
-  while (filled.length < capacity)
-    filled.push({ state: 'empty', cycle: 0 })
-  const locked: Array<Slot & { recipe?: Recipe }> = Array.from(
-    { length: Math.max(0, max - capacity) },
-    () => ({ state: 'locked' as const, cycle: 0 }),
+  const max = STATION_MAX_CAPACITY[station.id] || station.capacity || 1
+  const slots = station.slots.slice(0, station.capacity)
+  while (slots.length < station.capacity) slots.push({ state: 'empty' })
+  const locked: Slot[] = Array.from(
+    { length: Math.max(0, max - station.capacity) },
+    () => ({ state: 'locked' }),
   )
-  const all = [...filled, ...locked]
+  const all: Slot[] = [...slots, ...locked]
 
-  // Count gens (no inputs) vs refs (with inputs) so the player can see the
-  // current mix at a glance — this is the central decision in the Pit.
-  let gens = 0
-  let refs = 0
-  for (const s of filled) {
-    if (!s.recipe) continue
-    if (s.recipe.in.length === 0) gens += 1
-    else refs += 1
+  // Hint cost: the cheapest install the player can afford right now,
+  // computed against the full state so the global install-count is
+  // taken into account. Empty slots show this; the action recomputes.
+  const have = showState.purse['∮'] ?? 0
+  let cheapestCost: number | null = null
+  for (const id of ['brinePump', 'crusher', 'pipework', 'damper'] as ModuleId[]) {
+    const c = moduleCost(showState, id)
+    if (c <= have && (cheapestCost === null || c < cheapestCost)) cheapestCost = c
   }
+
+  const installedCount = station.slots.filter(
+    (s) => s.state === 'installed',
+  ).length
 
   return (
     <div>
-      {!dense && (
-        <div className="sc slot-rack-header">
-          <span>
-            mix{' '}
-            <span className="mono slot-rack-header-count">
-              {gens}G·{refs}R
-            </span>
+      <div className="sc slot-rack-header">
+        <span>
+          modules{' '}
+          <span className="mono slot-rack-header-count">
+            {installedCount}/{station.capacity}
           </span>
-          <span>tap to swap</span>
-        </div>
-      )}
+        </span>
+        <span>tap to swap</span>
+      </div>
       <div className="slot-rack-row">
         {all.map((s, i) => (
-          <SlotChip
+          <ModuleChip
             key={i}
             slot={s}
-            onSwap={
-              onSwapSlot && i < capacity ? () => onSwapSlot(i) : undefined
+            nextCost={i < station.capacity ? cheapestCost : null}
+            onCycle={
+              onCycleSlot && i < station.capacity ? () => onCycleSlot(i) : undefined
             }
           />
         ))}
@@ -196,39 +201,37 @@ function SlotRack({
 export function StationCard({
   idx,
   state,
-  upgrades,
+  showState,
   onTend,
   onRelight,
-  onSwapSlot,
+  onToggleRole,
+  onCycleSlot,
 }: {
   idx: number
   state: StationState
-  upgrades: Upgrades
+  showState: ShowState
   onTend?: () => void
   onRelight?: () => void
-  onSwapSlot?: (slot: number) => void
+  onToggleRole?: () => void
+  onCycleSlot?: (slot: number) => void
 }) {
   const def = STATIONS[state.id]
   if (!def) return null
   const condition = conditionOf(state.heat)
-  const c = COIN_COLOR[def.output.note as Coin] ?? obs.ink
-  const km = KIND_META[def.kind]
+  const recipe = effectiveStationRecipe(state)
+  const accent = COIN_COLOR[recipe.out.note as Coin] ?? obs.ink
   return (
     <div
       className="station-card"
       data-condition={condition}
       data-alarm={state.alarm || undefined}
-      style={{ '--station-color': c } as CSSProperties}
+      data-role={state.role}
+      style={{ '--station-color': accent } as CSSProperties}
     >
       <span className="mono station-card-badge">{String(idx).padStart(2, '0')}</span>
 
       <div className="station-card-header">
-        <span
-          className="sc station-kind"
-          style={{ '--kind-color': km.color } as CSSProperties}
-        >
-          {km.glyph} {km.label}
-        </span>
+        <RoleBadge role={state.role} onToggle={onToggleRole} />
         <h3 className="display station-name">{def.name}</h3>
         <span className="station-card-spacer" />
         <ConditionBadge condition={condition} />
@@ -238,17 +241,27 @@ export function StationCard({
         <div className="station-apparatus-cell">
           <Apparatus kind={state.id} condition={condition} />
           <div className="mono station-apparatus-cycle">
-            {state.auto ? '⚡ ' : ''}per-slot clocks
+            cycle {recipe.cycle.toFixed(1)}s · {state.role === 'gen' ? `∅→${recipe.out.qty}C` : `1C→${recipe.out.qty}∮`}
           </div>
         </div>
         <div className="station-info-cell">
-          <SlotRack
-            slots={state.slots}
-            capacity={state.capacity || STATION_CAPACITY[state.id] || 1}
-            max={STATION_MAX_CAPACITY[state.id] || state.capacity || 1}
-            stationId={state.id}
-            upgrades={upgrades}
-            onSwapSlot={onSwapSlot}
+          <ModuleRack
+            station={state}
+            showState={showState}
+            onCycleSlot={onCycleSlot}
+          />
+        </div>
+      </div>
+
+      <div className="station-meter-block">
+        <div className="sc station-meter-labels">
+          <span>cycle</span>
+          <span className="mono">{Math.round(state.cycle * 100)}%</span>
+        </div>
+        <div className="station-cycle-bar">
+          <span
+            className="station-cycle-fill"
+            style={{ width: `${state.cycle * 100}%` }}
           />
         </div>
       </div>
@@ -294,3 +307,4 @@ export function StationCard({
     </div>
   )
 }
+

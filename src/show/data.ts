@@ -84,7 +84,7 @@ export const STATIONS: Record<string, Station> = {
   },
   cistern: {
     id: 'cistern', kind: 'pit', name: 'Salt Cistern', verb: 'works',
-    blurb: 'A brine pit and a press in one. Each slot either digs raw tonic or presses tonic into applause.',
+    blurb: 'A brine pit / press. Set its role; bolt on modules to deepen it.',
     inputs: [], output: { note: '∮', qty: 1 }, cycle: 2,
   },
   bell: {
@@ -93,14 +93,14 @@ export const STATIONS: Record<string, Station> = {
     inputs: [], output: { note: 'B', qty: 1 }, cycle: 18,
   },
   bellows: {
-    id: 'bellows', kind: 'refine', name: 'Bellows-Pipe', verb: 'distills',
-    blurb: 'Forces a tonic through a pipe organ until a fifth condenses out the far end.',
-    inputs: [{ note: 'C', qty: 2 }], output: { note: 'G', qty: 1 }, cycle: 6,
+    id: 'bellows', kind: 'pit', name: 'Bellows-Pipe', verb: 'works',
+    blurb: 'A bellows-and-pipe rig. Set its role; bolt on modules to deepen it.',
+    inputs: [], output: { note: '∮', qty: 1 }, cycle: 2,
   },
   retort: {
-    id: 'retort', kind: 'refine', name: 'Resonance Retort', verb: 'resonates',
-    blurb: 'Two tones held in a glass chamber. When they sing in tune, they fuse into applause.',
-    inputs: [{ note: 'C', qty: 1 }, { note: 'E', qty: 1 }], output: { note: '∮', qty: 1 }, cycle: 9,
+    id: 'retort', kind: 'pit', name: 'Resonance Retort', verb: 'works',
+    blurb: 'A glass chamber. Set its role; bolt on modules to deepen it.',
+    inputs: [], output: { note: '∮', qty: 1 }, cycle: 2,
   },
   vise: {
     id: 'vise', kind: 'refine', name: 'Tempering Vise', verb: 'tempers',
@@ -273,39 +273,99 @@ export const WHEEL_PLANETS: Array<{ id: Note; stockMax: number }> = [
   { id: 'B', stockMax: 8 },
 ]
 
-// ── Pit upgrades ─────────────────────────────────────────────────────
-// Two tracks that pull the gen/ref balance in opposite directions:
+// ── Pit role + module model ─────────────────────────────────────────
+// Each pit station runs one of two role-derived recipes:
 //
-//   Brine Pump:  each Dig mints +1 more C per fire. Stronger gens → fewer
-//                gens needed → optimum drifts toward 1G+2R.
-//   Pipework:    Press cycle halves per level (×0.5). Hungrier refiners →
-//                more gens needed → optimum drifts toward 2G+1R.
+//   gen role: ∅ → 1 C, 4 s
+//   ref role: 1 C → 1 ∮, 2 s
 //
-// Stacking one without the other wastes ∮ in the raw-bound or ref-idle
-// regime; the interesting decision is which to invest in first, and when
-// to swap the slot mix to match.
+// Within the station, the 3-6 slots hold *modules* — passive
+// enhancements that modify the station's recipe. A module can be
+// role-locked (Brine Pump is meaningless on a Refiner) or universal
+// (Pipework speeds whatever cycle the station is running).
+//
+// The high-level decision is the gen:ref split across the three
+// stations — 2G+1R vs 1G+2R — and the lower-level decision is which
+// stations to deepen with which modules. Role-locked modules also
+// commit you: flipping a station's role turns its role-locked modules
+// inert, so the player has to plan the build.
 
-export type UpgradeId = 'genYield' | 'refSpeed'
+export type StationRole = 'gen' | 'ref'
 
-export const UPGRADES: Record<UpgradeId, {
+export const ROLE_RECIPES: Record<StationRole, {
+  in: Array<{ note: Coin; qty: number }>
+  out: { note: Coin; qty: number }
+  cycle: number
+}> = {
+  gen: { in: [], out: { note: 'C', qty: 1 }, cycle: 4 },
+  ref: { in: [{ note: 'C', qty: 1 }], out: { note: '∮', qty: 1 }, cycle: 2 },
+}
+
+export type ModuleId = 'brinePump' | 'crusher' | 'pipework' | 'damper'
+
+export type Module = {
+  id: ModuleId
   name: string
   blurb: string
-  base: number
-  scale: number
-}> = {
-  genYield: {
+  baseCost: number
+  costScale: number
+  roleLock?: StationRole
+  // Effects are applied multiplicatively (cycleMult, heatDrainMult) or
+  // additively (outputBonus) when the module is active on the host
+  // station's current role.
+  effects: {
+    outputBonus?: number     // +qty to the role recipe's output
+    cycleMult?: number       // multiplies the station's cycle (lower = faster)
+    heatDrainMult?: number   // multiplies heat-drain per beat
+  }
+}
+
+export const MODULES: Record<ModuleId, Module> = {
+  brinePump: {
+    id: 'brinePump',
     name: 'Brine Pump',
-    blurb: '+1 C per Dig fire.',
-    base: 8,
-    scale: 2,
+    blurb: '+1 C / fire',
+    baseCost: 8,
+    costScale: 2,
+    roleLock: 'gen',
+    effects: { outputBonus: 1 },
   },
-  refSpeed: {
+  crusher: {
+    id: 'crusher',
+    name: 'Crusher',
+    blurb: '+1 ∮ / fire',
+    baseCost: 12,
+    costScale: 2,
+    roleLock: 'ref',
+    effects: { outputBonus: 1 },
+  },
+  pipework: {
+    id: 'pipework',
     name: 'Pipework',
-    blurb: 'Press cycle ×½.',
-    base: 8,
-    scale: 2,
+    blurb: 'cycle ×0.6',
+    baseCost: 14,
+    costScale: 2,
+    effects: { cycleMult: 0.6 },
+  },
+  damper: {
+    id: 'damper',
+    name: 'Damper',
+    blurb: 'heat drain ×½',
+    baseCost: 6,
+    costScale: 2,
+    effects: { heatDrainMult: 0.5 },
   },
 }
+
+// Order used by the cycle-on-tap module picker in the station card.
+// null at the head means "tap from empty advances to brinePump".
+export const MODULE_CYCLE: Array<ModuleId | null> = [
+  null,
+  'brinePump',
+  'crusher',
+  'pipework',
+  'damper',
+]
 
 // Observatory palette also used by the show stages — kept in one place so
 // every component can import from here instead of duplicating hexes.

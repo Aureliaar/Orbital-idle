@@ -232,77 +232,48 @@
   margin-right: 3px;
 }
 
-.pit-upgrades {
-  border: 0.5px solid color-mix(in srgb, var(--text-h) 47%, transparent);
-  background: color-mix(in srgb, var(--bg2) 18%, transparent);
-  padding: 8px 10px 10px;
-}
+/* ── Role badge ──────────────────────────────────────────────────── */
 
-.pit-upgrades-header {
-  font-size: 8px;
-  color: var(--text-3);
-  letter-spacing: 0.2em;
-  margin-bottom: 6px;
-}
-
-.pit-upgrades-row {
-  display: flex;
-  gap: 8px;
-}
-
-.pit-upgrade {
-  flex: 1;
-  border: 0.5px solid color-mix(in srgb, var(--text-h) 40%, transparent);
-  background: var(--paper);
-  padding: 6px 8px 7px;
-  text-align: left;
+.role-badge {
+  --role-color: var(--text-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 3px;
   font-family: inherit;
-  color: inherit;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  border: 0.5px solid var(--role-color);
+  color: var(--role-color);
+  background: color-mix(in srgb, var(--role-color) 12%, transparent);
   cursor: pointer;
 }
 
-.pit-upgrade:disabled {
+.role-badge:disabled {
   cursor: default;
-  opacity: 0.55;
 }
 
-.pit-upgrade[data-affordable='true'] {
-  border: 0.5px solid var(--accent);
+.role-badge[data-role='gen'] {
+  --role-color: #2e6a4a;
 }
 
-.pit-upgrade-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
+.role-badge[data-role='ref'] {
+  --role-color: var(--accent);
 }
 
-.pit-upgrade-name {
-  font-size: 13px;
-  font-style: italic;
+.role-badge-glyph {
+  font-size: 11px;
+  line-height: 1;
 }
 
-.pit-upgrade-level {
+.role-badge-label {
+  font-size: 8.5px;
+}
+
+.role-badge-flip {
   font-size: 9px;
-  color: var(--text-3);
-  letter-spacing: 0.18em;
-}
-
-.pit-upgrade-blurb {
-  font-size: 9px;
-  color: var(--text);
-  margin-top: 2px;
-}
-
-.pit-upgrade-cost {
-  font-size: 10px;
-  color: var(--accent);
-  margin-top: 5px;
-  letter-spacing: 0.06em;
-}
-
-.pit-upgrade-cost-mark {
-  color: var(--gold);
+  opacity: 0.7;
+  margin-left: 2px;
 }
 
 /* ── Condition badge ────────────────────────────────────────────── */
@@ -376,8 +347,10 @@
   background: transparent;
   color: var(--text-3);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
 }
 
 .slot-chip[data-state='locked'] {
@@ -391,25 +364,15 @@
   cursor: default;
 }
 
-.slot-chip[data-state='active'],
-.slot-chip[data-state='idle'],
-.slot-chip[data-state='starved'] {
-  --slot-color: var(--text-h);
-  border: 0.5px solid var(--text-3);
-  background: var(--bg);
-}
-
-.slot-chip[data-state='active'] {
+.slot-chip[data-state='installed'],
+.slot-chip[data-state='inactive'] {
+  --slot-color: var(--gold);
   border: 0.5px solid var(--slot-color);
   background: color-mix(in srgb, var(--slot-color) 13%, transparent);
 }
 
-.slot-chip[data-state='idle'] {
-  opacity: 0.75;
-}
-
-.slot-chip[data-state='starved'] {
-  opacity: 0.55;
+.slot-chip[data-state='inactive'] {
+  opacity: 0.5;
 }
 
 .slot-chip-empty-label,
@@ -432,7 +395,8 @@
   background: var(--text-3);
 }
 
-.slot-chip[data-state='active'] .slot-chip-corner {
+.slot-chip[data-state='installed'] .slot-chip-corner,
+.slot-chip[data-state='inactive'] .slot-chip-corner {
   background: var(--slot-color);
 }
 
@@ -442,35 +406,21 @@
   gap: 4px;
 }
 
-.slot-chip-note {
+.slot-chip-module {
   font-style: italic;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--slot-color);
-  line-height: 1;
-  font-weight: 500;
-}
-
-.slot-chip-qty {
-  font-size: 9px;
-  color: var(--slot-color);
+  line-height: 1.1;
 }
 
 .slot-chip-spacer {
   flex: 1;
 }
 
-.slot-chip-pulse {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--slot-color);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--slot-color) 27%, transparent);
-}
-
-.slot-chip-starve {
+.slot-chip-inactive {
   font-size: 8px;
-  color: var(--accent);
-  letter-spacing: 0.15em;
+  color: var(--text-3);
+  letter-spacing: 0.18em;
 }
 
 .slot-chip-recipe {
@@ -483,21 +433,15 @@
   text-overflow: ellipsis;
 }
 
-.slot-chip-cycle {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: color-mix(in srgb, var(--text-h) 14%, transparent);
-  overflow: hidden;
+.slot-chip-rolelock {
+  color: var(--text-3);
+  font-style: italic;
 }
 
-.slot-chip-cycle-fill {
-  display: block;
-  height: 100%;
-  background: var(--slot-color, var(--text-h));
-  opacity: 0.7;
+.slot-chip-cost {
+  font-size: 8.5px;
+  color: var(--gold);
+  letter-spacing: 0.06em;
 }
 
 /* ── Slot rack ──────────────────────────────────────────────────── */

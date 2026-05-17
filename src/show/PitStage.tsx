@@ -1,15 +1,19 @@
-// Stage I — The Pit. A single station card (the Cistern) under a coin
-// purse strip, with an upgrades panel that lets the player invest ∮ in
-// either gen yield (Brine Pump) or ref speed (Pipework). The two tracks
-// pull the gen/ref balance in opposite directions; once the math tilts
-// far enough, swapping the slot mix (2 Dig + 1 Press ↔ 1 Dig + 2 Press)
-// is the move.
+// Stage I — The Pit. Three pit stations (Cistern, Bellows, Retort)
+// share a purse strip at the top. Each station has a role (Gen ↔ Ref)
+// that you toggle from the card header, and a small rack of module
+// slots that the player fills with enhancements as ∮ accumulates.
+//
+// The central decision is the gen:ref split across the three stations
+// (2G+1R ↔ 1G+2R), with the module loadout pushing each side's
+// throughput. Role-locked modules (Brine Pump, Crusher) make flipping a
+// station's role a real commitment — those modules go inactive on the
+// wrong role.
 
 import type { ShowAction } from '../App'
 import { CoinChip } from './Crown'
-import { UPGRADES, type Coin, type UpgradeId } from './data'
+import { type Coin } from './data'
 import { StationCard } from './Station'
-import { projectedApplauseRate, upgradeCost, type ShowState } from './state'
+import { projectedApplauseRate, type ShowState } from './state'
 
 const PURSE_ORDER: Coin[] = ['C', '∮', 'ƒ3']
 
@@ -20,7 +24,13 @@ export function PitStage({
   state: ShowState
   dispatch: (a: ShowAction) => void
 }) {
-  const rate = projectedApplauseRate(state, 0)
+  // Attention modulates cycle speed (0.5× at 0, 1.5× at full house).
+  // Show the actual instantaneous rate so the player notices the
+  // attention drain rather than wondering why ∮ accumulates slower
+  // than the headline number.
+  const baseRate = projectedApplauseRate(state)
+  const cycleSpeed = 0.5 + state.attention
+  const rate = baseRate * cycleSpeed
   return (
     <div className="pit-stage">
       <div className="pit-purse">
@@ -30,7 +40,7 @@ export function PitStage({
           return <CoinChip key={k} note={k} qty={qty} dim={qty === 0} dashed={k === 'ƒ3'} />
         })}
         <span className="pit-purse-spacer" />
-        <span className="sc pit-rate" title="projected ∮/s at base attention">
+        <span className="sc pit-rate" title="∮/s at current attention; full house = 1.5× base">
           <span className="mono pit-rate-value">{rate.toFixed(2)}</span> ∮/s
         </span>
       </div>
@@ -41,57 +51,13 @@ export function PitStage({
             key={s.id}
             idx={i + 1}
             state={s}
-            upgrades={state.upgrades}
+            showState={state}
             onTend={() => dispatch({ type: 'tend', station: i })}
             onRelight={() => dispatch({ type: 'relight', station: i })}
-            onSwapSlot={(slot) => dispatch({ type: 'swap', station: i, slot })}
+            onToggleRole={() => dispatch({ type: 'toggleRole', station: i })}
+            onCycleSlot={(slot) => dispatch({ type: 'cycleModule', station: i, slot })}
           />
         ))}
-
-        <UpgradesPanel state={state} dispatch={dispatch} />
-      </div>
-    </div>
-  )
-}
-
-function UpgradesPanel({
-  state,
-  dispatch,
-}: {
-  state: ShowState
-  dispatch: (a: ShowAction) => void
-}) {
-  const purse = state.purse['∮'] ?? 0
-  const ids: UpgradeId[] = ['genYield', 'refSpeed']
-  return (
-    <div className="pit-upgrades">
-      <div className="sc pit-upgrades-header">upgrades · spend ∮ to tilt the balance</div>
-      <div className="pit-upgrades-row">
-        {ids.map((id) => {
-          const u = UPGRADES[id]
-          const level = state.upgrades[id]
-          const cost = upgradeCost(id, level)
-          const canAfford = purse >= cost
-          return (
-            <button
-              key={id}
-              type="button"
-              className="pit-upgrade"
-              data-affordable={canAfford || undefined}
-              onClick={() => dispatch({ type: 'buy', upgrade: id })}
-              disabled={!canAfford}
-            >
-              <div className="pit-upgrade-row">
-                <span className="display pit-upgrade-name">{u.name}</span>
-                <span className="mono pit-upgrade-level">L{level}</span>
-              </div>
-              <div className="mono pit-upgrade-blurb">{u.blurb}</div>
-              <div className="mono pit-upgrade-cost">
-                {cost} <span className="pit-upgrade-cost-mark">∮</span>
-              </div>
-            </button>
-          )
-        })}
       </div>
     </div>
   )
