@@ -1,6 +1,7 @@
 // Stage I — The Pit. Vertical chain of station cards under a coin purse
 // strip. Ported from production-screens.jsx · PitScreen.
 
+import type { ShowAction } from '../App'
 import { CoinChip } from './Crown'
 import { obs, type Coin } from './data'
 import { StationCard } from './Station'
@@ -8,7 +9,13 @@ import type { ShowState } from './state'
 
 const PURSE_ORDER: Coin[] = ['C', 'E', 'G', 'ƒ3', '∮']
 
-export function PitStage({ state }: { state: ShowState }) {
+export function PitStage({
+  state,
+  dispatch,
+}: {
+  state: ShowState
+  dispatch: (a: ShowAction) => void
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div
@@ -53,7 +60,14 @@ export function PitStage({ state }: { state: ShowState }) {
         }}
       >
         {state.stations.map((s, i) => (
-          <StationCard key={s.id} idx={i + 1} state={s} />
+          <StationCard
+            key={s.id}
+            idx={i + 1}
+            state={s}
+            onTend={() => dispatch({ type: 'tend', station: i })}
+            onRelight={() => dispatch({ type: 'relight', station: i })}
+            onSwapSlot={(slot) => dispatch({ type: 'swap', station: i, slot })}
+          />
         ))}
         <div
           style={{

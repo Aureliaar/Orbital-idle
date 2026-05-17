@@ -79,10 +79,18 @@ export function HeatMeter({ value, condition }: { value: number; condition: Cond
   )
 }
 
-function SlotChip({ slot }: { slot: Slot & { recipe?: Recipe } }) {
+function SlotChip({
+  slot,
+  onSwap,
+}: {
+  slot: Slot & { recipe?: Recipe }
+  onSwap?: () => void
+}) {
   if (!slot || slot.state === 'empty') {
     return (
-      <div
+      <button
+        type="button"
+        onClick={onSwap}
         style={{
           flex: 1,
           minWidth: 0,
@@ -94,10 +102,12 @@ function SlotChip({ slot }: { slot: Slot & { recipe?: Recipe } }) {
           justifyContent: 'center',
           color: obs.ink3,
           minHeight: 50,
+          cursor: onSwap ? 'pointer' : 'default',
+          fontFamily: 'inherit',
         }}
       >
         <span className="sc" style={{ fontSize: 9, letterSpacing: '0.2em' }}>+ slot</span>
-      </div>
+      </button>
     )
   }
   if (slot.state === 'locked') {
@@ -127,7 +137,9 @@ function SlotChip({ slot }: { slot: Slot & { recipe?: Recipe } }) {
   const active = slot.state === 'active'
   const starved = slot.state === 'starved'
   return (
-    <div
+    <button
+      type="button"
+      onClick={onSwap}
       style={{
         flex: 1,
         minWidth: 0,
@@ -137,6 +149,9 @@ function SlotChip({ slot }: { slot: Slot & { recipe?: Recipe } }) {
         padding: '4px 6px 5px',
         opacity: starved ? 0.55 : slot.state === 'idle' ? 0.75 : 1,
         minHeight: 50,
+        cursor: onSwap ? 'pointer' : 'default',
+        textAlign: 'left',
+        fontFamily: 'inherit',
       }}
     >
       <span
@@ -189,7 +204,7 @@ function SlotChip({ slot }: { slot: Slot & { recipe?: Recipe } }) {
       >
         {recipeLabel(r)}
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -199,12 +214,14 @@ function SlotRack({
   max,
   dense = false,
   stationId,
+  onSwapSlot,
 }: {
   slots: Slot[]
   capacity: number
   max: number
   dense?: boolean
   stationId: string
+  onSwapSlot?: (slot: number) => void
 }) {
   const lib = STATION_RECIPES[stationId] ?? []
   const resolveRecipe = (slot: Slot) =>
@@ -245,7 +262,13 @@ function SlotRack({
       )}
       <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
         {all.map((s, i) => (
-          <SlotChip key={i} slot={s} />
+          <SlotChip
+            key={i}
+            slot={s}
+            onSwap={
+              onSwapSlot && i < capacity ? () => onSwapSlot(i) : undefined
+            }
+          />
         ))}
       </div>
     </div>
@@ -255,9 +278,15 @@ function SlotRack({
 export function StationCard({
   idx,
   state,
+  onTend,
+  onRelight,
+  onSwapSlot,
 }: {
   idx: number
   state: StationState
+  onTend?: () => void
+  onRelight?: () => void
+  onSwapSlot?: (slot: number) => void
 }) {
   const def = STATIONS[state.id]
   if (!def) return null
@@ -348,6 +377,7 @@ export function StationCard({
             capacity={state.capacity || STATION_CAPACITY[state.id] || 1}
             max={STATION_MAX_CAPACITY[state.id] || state.capacity || 1}
             stationId={state.id}
+            onSwapSlot={onSwapSlot}
           />
         </div>
       </div>
@@ -412,7 +442,9 @@ export function StationCard({
       </div>
 
       {state.alarm && (
-        <div
+        <button
+          type="button"
+          onClick={condition === 'cold' ? onRelight : onTend}
           className="sc"
           style={{
             marginTop: 8,
@@ -425,6 +457,9 @@ export function StationCard({
             padding: '4px 8px',
             border: `0.5px solid ${obs.rust}`,
             background: obs.rust + '14',
+            width: '100%',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
           }}
         >
           <span style={{ fontSize: 11 }}>✦</span>
@@ -440,18 +475,23 @@ export function StationCard({
           >
             {condition === 'cold' ? '✦ relight →' : '⚒ tend →'}
           </span>
-        </div>
+        </button>
       )}
 
-      <span
+      <button
+        type="button"
+        onClick={onTend}
+        aria-label="tend"
         style={{
           position: 'absolute',
           right: -8,
           top: '50%',
           transform: 'translateY(-50%)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
+          padding: 0,
+          background: 'transparent',
+          border: 'none',
+          cursor: onTend ? 'pointer' : 'default',
+          fontFamily: 'inherit',
         }}
       >
         <span
@@ -472,7 +512,7 @@ export function StationCard({
         >
           tend
         </span>
-      </span>
+      </button>
     </div>
   )
 }
