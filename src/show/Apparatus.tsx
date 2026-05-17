@@ -16,7 +16,7 @@ export function Apparatus({
   const stroke = obs.ink
   const hatchId = `hatch-${kind}-${condition}`
   return (
-    <svg viewBox="0 0 120 64" style={{ width: '100%', height: 64, display: 'block' }}>
+    <svg viewBox="0 0 120 64" className="station-apparatus-svg">
       <defs>
         <pattern
           id={hatchId}

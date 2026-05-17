@@ -3,7 +3,7 @@
 
 import type { ShowAction } from '../App'
 import { CoinChip } from './Crown'
-import { obs, type Coin } from './data'
+import { type Coin } from './data'
 import { StationCard } from './Station'
 import type { ShowState } from './state'
 
@@ -17,48 +17,16 @@ export function PitStage({
   dispatch: (a: ShowAction) => void
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div
-        style={{
-          padding: '8px 12px',
-          display: 'flex',
-          gap: 4,
-          flexWrap: 'wrap',
-          borderBottom: `0.5px dotted ${obs.ink}55`,
-          background: obs.bg2 + '22',
-          position: 'relative',
-          zIndex: 2,
-        }}
-      >
-        <span
-          className="sc"
-          style={{
-            fontSize: 8,
-            color: obs.ink2,
-            letterSpacing: '0.22em',
-            alignSelf: 'center',
-            marginRight: 4,
-          }}
-        >
-          purse
-        </span>
+    <div className="pit-stage">
+      <div className="pit-purse">
+        <span className="sc pit-purse-label">purse</span>
         {PURSE_ORDER.map((k) => {
           const qty = state.purse[k] ?? 0
           return <CoinChip key={k} note={k} qty={qty} dim={qty === 0} dashed={k === 'ƒ3'} />
         })}
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          padding: '12px 20px 16px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          position: 'relative',
-          zIndex: 2,
-        }}
-      >
+      <div className="pit-stations">
         {state.stations.map((s, i) => (
           <StationCard
             key={s.id}
@@ -69,24 +37,11 @@ export function PitStage({
             onSwapSlot={(slot) => dispatch({ type: 'swap', station: i, slot })}
           />
         ))}
-        <div
-          style={{
-            border: `1px dashed ${obs.ink}77`,
-            background: obs.bg2 + '33',
-            padding: '12px 12px',
-            textAlign: 'center',
-            position: 'relative',
-          }}
-        >
-          <div
-            className="display"
-            style={{ fontSize: 15, fontStyle: 'italic', color: obs.ink2 }}
-          >
-            + a fourth station
-          </div>
-          <div className="mono" style={{ fontSize: 9, color: obs.ink3, marginTop: 2 }}>
-            costs <span style={{ color: obs.rust }}>8 ∮</span> +{' '}
-            <span style={{ color: obs.ink2 }}>3 ✎</span> · unlock via research
+        <div className="pit-add-station">
+          <div className="display pit-add-station-title">+ a fourth station</div>
+          <div className="mono pit-add-station-cost">
+            costs <span className="cost-amber">8 ∮</span> +{' '}
+            <span className="cost-writ">3 ✎</span> · unlock via research
           </div>
         </div>
       </div>

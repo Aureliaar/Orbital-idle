@@ -2,6 +2,7 @@
 // Displays Folio · Act · Scene · Bar plus an audience attention bar with
 // hatched parchment fill. Ported from production.jsx · ShowCrown.
 
+import type { CSSProperties } from 'react'
 import { obs, type Note } from './data'
 import { BARS_PER_ACT } from './state'
 
@@ -27,48 +28,18 @@ export function ShowCrown({
   attention: number
 }) {
   return (
-    <div
-      style={{
-        padding: '12px 16px 8px',
-        position: 'relative',
-        zIndex: 2,
-        borderBottom: `0.5px solid ${obs.ink}`,
-      }}
-    >
-      <div
-        className="sc"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 8,
-          color: obs.ink2,
-          letterSpacing: '0.22em',
-          textTransform: 'uppercase',
-        }}
-      >
+    <div className="show-crown">
+      <div className="sc show-crown-meta">
         <span>Folio I · {TAB_TITLES[tab]}</span>
-        <span style={{ color: obs.rust }}>● live</span>
+        <span className="show-crown-live">● live</span>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
-          marginTop: 2,
-        }}
-      >
-        <h1
-          className="display"
-          style={{ fontSize: 26, fontStyle: 'italic', lineHeight: 1, margin: 0, fontWeight: 400 }}
-        >
-          The Show<span style={{ color: obs.rust, fontStyle: 'normal' }}>.</span>
+      <div className="show-crown-title-row">
+        <h1 className="display show-crown-title">
+          The Show<span className="show-crown-title-dot">.</span>
         </h1>
-        <span
-          className="display"
-          style={{ fontStyle: 'italic', fontSize: 12, color: obs.ink2 }}
-        >
+        <span className="display show-crown-subtitle">
           Act {act} · Sc. {scene} · bar{' '}
-          <span className="mono" style={{ color: obs.ink }}>{bar}</span>/{BARS_PER_ACT}
+          <span className="mono">{bar}</span>/{BARS_PER_ACT}
         </span>
       </div>
       <AttentionBar attention={attention} />
@@ -79,32 +50,14 @@ export function ShowCrown({
 function AttentionBar({ attention }: { attention: number }) {
   const pct = Math.round(attention * 100)
   return (
-    <div style={{ marginTop: 8 }}>
-      <div
-        className="sc"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 8,
-          color: obs.ink2,
-          letterSpacing: '0.22em',
-          marginBottom: 2,
-        }}
-      >
+    <div className="attention-bar">
+      <div className="sc attention-bar-labels">
         <span>Audience attention</span>
-        <span className="mono" style={{ color: obs.rust }}>{pct}%</span>
+        <span className="mono attention-bar-pct">{pct}%</span>
       </div>
-      <div
-        style={{
-          position: 'relative',
-          height: 9,
-          border: `0.5px solid ${obs.ink}`,
-          background: obs.paper,
-          overflow: 'hidden',
-        }}
-      >
+      <div className="attention-bar-track">
         <svg
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          className="attention-bar-svg"
           preserveAspectRatio="none"
           viewBox="0 0 100 10"
         >
@@ -145,17 +98,8 @@ export function StageTabs({
     { id: 'research', roman: 'III', label: 'Research' },
   ]
   return (
-    <div
-      role="tablist"
-      style={{
-        display: 'flex',
-        borderTop: `0.5px solid ${obs.ink}`,
-        borderBottom: `0.5px solid ${obs.ink}`,
-        position: 'relative',
-        zIndex: 2,
-      }}
-    >
-      {tabs.map((t, i) => {
+    <div role="tablist" className="stage-tabs">
+      {tabs.map((t) => {
         const on = t.id === active
         return (
           <button
@@ -164,29 +108,10 @@ export function StageTabs({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.id)}
-            style={{
-              flex: 1,
-              padding: '7px 8px',
-              background: on ? obs.ink : 'transparent',
-              color: on ? obs.bg : obs.ink,
-              border: 'none',
-              borderRight: i < tabs.length - 1 ? `0.5px solid ${obs.ink}` : 'none',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
+            className="stage-tab"
           >
-            <span
-              className="sc"
-              style={{ fontSize: 8, letterSpacing: '0.22em', color: on ? obs.rustSoft : obs.rust }}
-            >
-              Stage {t.roman}
-            </span>
-            <span className="display" style={{ fontStyle: 'italic', fontSize: 14, lineHeight: 1.1 }}>
-              {t.label}
-            </span>
+            <span className="sc stage-tab-eyebrow">Stage {t.roman}</span>
+            <span className="display stage-tab-title">{t.label}</span>
           </button>
         )
       })}
@@ -217,31 +142,16 @@ export function CoinChip({
     'ƒ3': '#5a6cf0', 'ƒ5': '#3ab07a', '∮': '#7a5a1a', '✎': '#3d2c1a',
   }
   const c = colours[note] ?? obs.ink
-  const fontSize = size === 'lg' ? 13 : 11
   return (
     <span
-      className="mono"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'baseline',
-        gap: 4,
-        padding: size === 'lg' ? '3px 8px' : '2px 6px',
-        border: `${dashed ? '1px dashed' : '0.5px solid'} ${c}`,
-        background: c + '14',
-        fontSize,
-        opacity: dim ? 0.5 : 1,
-      }}
+      className="mono coin-chip"
+      data-size={size}
+      data-dim={dim || undefined}
+      data-dashed={dashed || undefined}
+      style={{ '--coin-color': c } as CSSProperties}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: c,
-          display: 'inline-block',
-        }}
-      />
-      <span style={{ color: c, fontWeight: 700 }}>{note}</span>
+      <span className="coin-chip-dot" />
+      <span className="coin-chip-note">{note}</span>
       {qty != null && <span>{qty}</span>}
     </span>
   )
