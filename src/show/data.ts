@@ -12,10 +12,14 @@ export type Recipe = {
   in: Array<{ note: Coin; qty: number }>
   out: { note: Coin; qty: number }
   unlocked: boolean
+  // Per-recipe cycle length in seconds. Falls back to the station's cycle
+  // when absent. The Pit's dig/press recipes set this so a single station
+  // can run a generator and a refiner side-by-side at different cadences.
+  cycle?: number
   hint?: string
 }
 
-export type Kind = 'extract' | 'refine' | 'research'
+export type Kind = 'extract' | 'refine' | 'research' | 'pit'
 
 export type Station = {
   id: string
@@ -64,6 +68,7 @@ export const KIND_META: Record<Kind, { glyph: string; label: string; color: stri
   extract: { glyph: '◇', label: 'extract', color: '#2e6a4a', hint: 'tap to draw a note from the æther' },
   refine: { glyph: '△', label: 'refine', color: '#8c2a12', hint: 'auto-feeds inputs · output every cycle' },
   research: { glyph: '✎', label: 'research', color: '#3d2c1a', hint: 'long cycles · output advances the tree' },
+  pit: { glyph: '◈', label: 'pit', color: '#6b3d2a', hint: 'mixed bench — dig & press in the same station' },
 }
 
 export const STATIONS: Record<string, Station> = {
@@ -78,9 +83,9 @@ export const STATIONS: Record<string, Station> = {
     inputs: [], output: { note: 'A', qty: 1 }, cycle: 10,
   },
   cistern: {
-    id: 'cistern', kind: 'extract', name: 'Salt Cistern', verb: 'precipitates',
-    blurb: 'A brine vat that crystallises into the tonic note over slow bars.',
-    inputs: [], output: { note: 'C', qty: 2 }, cycle: 14,
+    id: 'cistern', kind: 'pit', name: 'Salt Cistern', verb: 'works',
+    blurb: 'A brine pit and a press in one. Each slot either digs raw tonic or presses tonic into applause.',
+    inputs: [], output: { note: '∮', qty: 1 }, cycle: 2,
   },
   bell: {
     id: 'bell', kind: 'extract', name: 'Carillon Bell', verb: 'rings',
@@ -154,12 +159,8 @@ export const STATION_RECIPES: Record<string, Recipe[]> = {
     { id: 'meld', in: [{ note: 'ƒ3', qty: 2 }], out: { note: 'ƒ5', qty: 1 }, unlocked: false, hint: 'meld sparks' },
   ],
   cistern: [
-    { id: 'salt', in: [], out: { note: 'C', qty: 2 }, unlocked: true, hint: 'steady tonic' },
-    { id: 'brine', in: [], out: { note: 'C', qty: 3 }, unlocked: true, hint: 'richer · slower' },
-    { id: 'sparks', in: [], out: { note: 'ƒ3', qty: 1 }, unlocked: false, hint: 'precipitates sparks' },
-    { id: 'sweet', in: [], out: { note: 'F', qty: 1 }, unlocked: false, hint: 'sweet brine — yields F' },
-    { id: 'lye', in: [], out: { note: 'D', qty: 1 }, unlocked: false, hint: 'caustic supertonic' },
-    { id: 'amber', in: [], out: { note: '∮', qty: 1 }, unlocked: false, hint: 'a slow drip of applause' },
+    { id: 'dig', in: [], out: { note: 'C', qty: 1 }, unlocked: true, cycle: 4, hint: 'mint raw tonic' },
+    { id: 'press', in: [{ note: 'C', qty: 1 }], out: { note: '∮', qty: 1 }, unlocked: true, cycle: 2, hint: 'tonic → applause' },
   ],
   diapason: [
     { id: 'strike', in: [], out: { note: 'E', qty: 1 }, unlocked: true, hint: 'fundamental' },
@@ -271,6 +272,40 @@ export const WHEEL_PLANETS: Array<{ id: Note; stockMax: number }> = [
   { id: 'A', stockMax: 16 },
   { id: 'B', stockMax: 8 },
 ]
+
+// ── Pit upgrades ─────────────────────────────────────────────────────
+// Two tracks that pull the gen/ref balance in opposite directions:
+//
+//   Brine Pump:  each Dig mints +1 more C per fire. Stronger gens → fewer
+//                gens needed → optimum drifts toward 1G+2R.
+//   Pipework:    Press cycle halves per level (×0.5). Hungrier refiners →
+//                more gens needed → optimum drifts toward 2G+1R.
+//
+// Stacking one without the other wastes ∮ in the raw-bound or ref-idle
+// regime; the interesting decision is which to invest in first, and when
+// to swap the slot mix to match.
+
+export type UpgradeId = 'genYield' | 'refSpeed'
+
+export const UPGRADES: Record<UpgradeId, {
+  name: string
+  blurb: string
+  base: number
+  scale: number
+}> = {
+  genYield: {
+    name: 'Brine Pump',
+    blurb: '+1 C per Dig fire.',
+    base: 8,
+    scale: 2,
+  },
+  refSpeed: {
+    name: 'Pipework',
+    blurb: 'Press cycle ×½.',
+    base: 8,
+    scale: 2,
+  },
+}
 
 // Observatory palette also used by the show stages — kept in one place so
 // every component can import from here instead of duplicating hexes.

@@ -250,16 +250,15 @@ export function ResearchStage({ state }: { state: ShowState }) {
           const fakeState = {
             id,
             slots: [
-              { state: 'active' as const, recipeId: lib[0].id },
-              ...(id === 'camera' ? [{ state: 'empty' as const }] : []),
+              { state: 'active' as const, recipeId: lib[0].id, cycle: id === 'scriptorium' ? 0.42 : 0.71 },
+              ...(id === 'camera' ? [{ state: 'empty' as const, cycle: 0 }] : []),
             ],
             capacity: id === 'camera' ? 2 : 1,
             heat: id === 'scriptorium' ? 0.82 : 0.39,
-            cycle: id === 'scriptorium' ? 0.42 : 0.71,
             auto: id === 'camera',
             alarm: false,
           }
-          return <StationCard key={id} idx={i + 1} state={fakeState} />
+          return <StationCard key={id} idx={i + 1} state={fakeState} upgrades={state.upgrades} />
         })}
       </div>
     </div>

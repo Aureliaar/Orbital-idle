@@ -15,10 +15,12 @@ import {
   STATIONS,
   STATION_CAPACITY,
   STATION_RECIPES,
+  UPGRADES,
   WHEEL_PLANETS,
   type Coin,
   type Note,
   type Recipe,
+  type UpgradeId,
 } from './data'
 
 export const BEAT_MS = 250
@@ -28,19 +30,33 @@ export type Condition = 'warm' | 'tepid' | 'cold'
 
 export type SlotState = 'active' | 'idle' | 'starved' | 'empty' | 'locked'
 // `committed` means inputs have been debited from the purse and the slot is
-// owed its output at the next station-cycle rollover. Extractors with no
+// owed its output at the next slot-cycle rollover. Generators with no
 // inputs commit trivially. Slots with recipes that lack their inputs sit at
-// `starved` with `committed: false` until the purse can pay.
-export type Slot = { state: SlotState; recipeId?: string; committed?: boolean }
+// `starved` with `committed: false` until the purse can pay. `cycle` is the
+// per-slot fraction toward the next fire (in [0, 1)); each slot runs its
+// own clock so a generator and a refiner in the same station can fire at
+// different cadences.
+export type Slot = {
+  state: SlotState
+  recipeId?: string
+  committed?: boolean
+  cycle: number
+}
 
 export type StationState = {
   id: string
   slots: Slot[]
   capacity: number
   heat: number      // [0, 1]
-  cycle: number     // [0, 1) — fraction of one cycle
   auto: boolean
   alarm: boolean
+}
+
+export type Upgrades = {
+  // Each level adds +1 to the Dig recipe's output qty.
+  genYield: number
+  // Each level halves the Press recipe's cycle (cycle × 0.5^N).
+  refSpeed: number
 }
 
 export type PlanetState = {
@@ -76,6 +92,8 @@ export type ShowState = {
   writs: number
   // purse, displayed in the Pit's strip and consumed by station recipes
   purse: Partial<Record<Coin, number>>
+  // bought-upgrade levels — modify recipe yield / cycle in the Pit
+  upgrades: Upgrades
 }
 
 // ── Tuning constants (handoff spec) ─────────────────────────────────
@@ -96,59 +114,55 @@ export function conditionOf(heat: number): Condition {
   return 'cold'
 }
 
-// Initial state — mirrors the "normal" PitScreen scenario plus a wheel
-// and research board in mid-game. The values are static seeds; the
-// player would override them via interaction once that layer ships.
+// Initial state — Act I, fresh start. One station (the Pit's Cistern)
+// pre-loaded with the canonical 2G+1R: two Dig slots, one Press slot.
+// Both gens fire trivially; the press starves on beat 1 then commits the
+// moment the first dig credits a C to the purse.
 export function initialState(): ShowState {
-  const seedStation = (
-    id: string,
-    heat: number,
-    cycle: number,
-    auto: boolean,
-    recipeIds: Array<string | null>,
-  ): StationState => {
-    const lib = STATION_RECIPES[id] ?? []
-    const capacity = STATION_CAPACITY[id] ?? recipeIds.length
+  const seedPit = (): StationState => {
+    const lib = STATION_RECIPES.cistern ?? []
+    const capacity = STATION_CAPACITY.cistern ?? 3
+    const recipeIds: Array<string | null> = ['dig', 'dig', 'press']
     const slots: Slot[] = []
     for (let i = 0; i < capacity; i++) {
-      const r = recipeIds[i] ? lib.find((x) => x.id === recipeIds[i]) : undefined
-      if (!r) slots.push({ state: 'empty' })
-      // Seeded mid-cycle stations have notionally already paid their inputs —
-      // grandfather them as committed so the first rollover delivers outputs
-      // without retroactively debiting the purse. Locked recipes never
-      // commit: they sit starved until research unlocks them.
-      else if (r.unlocked) slots.push({ state: 'active', recipeId: r.id, committed: true })
-      else slots.push({ state: 'starved', recipeId: r.id, committed: false })
+      const id = recipeIds[i]
+      const r = id ? lib.find((x) => x.id === id) : undefined
+      if (!r) slots.push({ state: 'empty', cycle: 0 })
+      else if (r.unlocked) {
+        const committed = r.in.length === 0
+        slots.push({
+          state: committed ? 'active' : 'starved',
+          recipeId: r.id,
+          committed,
+          cycle: 0,
+        })
+      } else slots.push({ state: 'starved', recipeId: r.id, committed: false, cycle: 0 })
     }
-    return { id, slots, capacity, heat, cycle, auto, alarm: false }
+    return { id: 'cistern', slots, capacity, heat: 0.8, auto: false, alarm: false }
   }
 
   return {
-    act: 'II',
-    scene: 'iii',
-    bar: 47,
+    act: 'I',
+    scene: 'i',
+    bar: 1,
     beat: 0,
-    attention: 0.62,
-    stations: [
-      seedStation('cistern', 0.81, 0.34, false, ['salt', 'brine', 'sparks']),
-      seedStation('bellows', 0.86, 0.62, false, ['fifth', 'fourth', 'octave']),
-      seedStation('retort', 0.48, 0.85, true, ['major', 'cascade', null]),
-    ],
-    planets: WHEEL_PLANETS.map((p, i) => ({
+    attention: 0.5,
+    stations: [seedPit()],
+    // Wheel + research seeds are kept so the other tabs read something,
+    // but they're cosmetic until those stages get their own interaction.
+    planets: WHEEL_PLANETS.map((p) => ({
       id: p.id,
       stockMax: p.stockMax,
-      // seed values mirror the WheelScreen mockup
-      stock: [18, 4, 9, 2, 11, 6, 1][i] ?? 0,
+      stock: Math.floor(p.stockMax / 2),
     })),
     conjunctions: [
-      { pair: ['E', 'G'], ratio: '5:4', inBars: 0, durationBars: 14, open: true },
-      { pair: ['C', 'G'], ratio: '3:2', inBars: 8, durationBars: 14, open: false },
-      { pair: ['C', 'F'], ratio: '4:3', inBars: 31, durationBars: 14, open: false },
-      { pair: ['D', 'A'], ratio: '3:2', inBars: 54, durationBars: 14, open: false },
+      { pair: ['C', 'G'], ratio: '3:2', inBars: 12, durationBars: 14, open: false },
+      { pair: ['C', 'F'], ratio: '4:3', inBars: 32, durationBars: 14, open: false },
     ],
-    activeInquiryProgress: 0.62,
-    writs: 7,
-    purse: { C: 18, E: 7, G: 5, 'ƒ3': 2, '∮': 14 },
+    activeInquiryProgress: 0,
+    writs: 0,
+    purse: { C: 0, '∮': 0, 'ƒ3': 1 },
+    upgrades: { genYield: 0, refSpeed: 0 },
   }
 }
 
@@ -169,6 +183,29 @@ function purseCredit(purse: Partial<Record<Coin, number>>, out: Recipe['out']): 
 function resolveRecipe(stationId: string, recipeId?: string): Recipe | undefined {
   if (!recipeId) return undefined
   return (STATION_RECIPES[stationId] ?? []).find((r) => r.id === recipeId)
+}
+
+// Apply upgrade modifiers to a recipe. Returns a fresh Recipe each call;
+// callers can read .cycle and .out.qty without further bookkeeping.
+export function effectiveRecipe(
+  stationId: string,
+  recipeId: string | undefined,
+  upgrades: Upgrades,
+): Recipe | undefined {
+  const r = resolveRecipe(stationId, recipeId)
+  if (!r) return undefined
+  if (recipeId === 'dig' && upgrades.genYield > 0) {
+    return { ...r, out: { ...r.out, qty: r.out.qty + upgrades.genYield } }
+  }
+  if (recipeId === 'press' && upgrades.refSpeed > 0) {
+    const base = r.cycle ?? STATIONS[stationId]?.cycle ?? 2
+    return { ...r, cycle: base * Math.pow(0.5, upgrades.refSpeed) }
+  }
+  return r
+}
+
+function slotCycleSeconds(stationId: string, r: Recipe): number {
+  return r.cycle ?? STATIONS[stationId]?.cycle ?? 4
 }
 
 // Try to commit a slot for the upcoming cycle. Returns the next slot shape.
@@ -215,61 +252,68 @@ export function tickBeat(prev: ShowState): ShowState {
     const def = STATIONS[s.id]
     if (!def) continue
 
-    // Starved slots get a per-beat recovery attempt: if the purse just filled
-    // up (e.g. an extractor delivered C this beat), the starved refiner can
-    // commit now and start advancing toward the next rollover without waiting
-    // a full cycle.
-    for (let j = 0; j < s.slots.length; j++) {
-      const sl = s.slots[j]
-      if (sl.state === 'starved' && !sl.committed) {
-        s.slots[j] = tryCommit(sl, s.id, next.purse)
-      }
-    }
-
     const anyCommitted = s.slots.some((sl) => sl.committed)
 
-    // Heat dynamics: drain is halved while something is committed and the
-    // station is actually working; otherwise it cools at full rate.
+    // Heat dynamics: drain is halved while something is committed; otherwise
+    // it cools at full rate. Cold (heat < HEAT_COLD) freezes every slot's
+    // cycle but doesn't uncommit — a relight thaws and resumes.
     const drain = anyCommitted
       ? HEAT_DRAIN_PER_BEAT * HEAT_DRAIN_ACTIVE_MULT
       : HEAT_DRAIN_PER_BEAT
     s.heat = Math.max(0, s.heat - drain)
-
-    // Cold (heat < HEAT_COLD) freezes the cycle but does not uncommit —
-    // a relight thaws and resumes from where the cycle paused.
     const heatFactor = s.heat >= HEAT_COLD ? 1 : 0
 
-    if (anyCommitted && heatFactor > 0) {
-      const advance = (1 / (def.cycle * 4)) * cycleSpeed * heatFactor
-      s.cycle += advance
+    let firedTotal = 0
+
+    // Pass A: advance every committed slot's own clock. On rollover, credit
+    // its output and clear the commit. Slots that finish here can recommit
+    // in Pass B using whatever just landed in the purse.
+    if (heatFactor > 0) {
+      for (let j = 0; j < s.slots.length; j++) {
+        const slot = s.slots[j]
+        if (!slot.committed || !slot.recipeId) continue
+        const r = effectiveRecipe(s.id, slot.recipeId, next.upgrades)
+        if (!r) continue
+        const advance = (1 / (slotCycleSeconds(s.id, r) * 4)) * cycleSpeed * heatFactor
+        slot.cycle += advance
+        while (slot.cycle >= 1) {
+          slot.cycle -= 1
+          purseCredit(next.purse, r.out)
+          firedTotal += 1
+          slot.committed = false
+          // If the same slot will fire again this beat, the next iteration
+          // needs to recommit first. Otherwise Pass B will handle it.
+          if (slot.cycle >= 1) {
+            const re = tryCommit(slot, s.id, next.purse)
+            if (!re.committed) {
+              slot.cycle = 0
+              slot.state = re.state
+              break
+            }
+            slot.state = re.state
+            slot.committed = true
+          }
+        }
+      }
     }
 
-    while (s.cycle >= 1) {
-      s.cycle -= 1
-      // Phase A: deliver outputs from every committed slot, refill attention,
-      // bump heat from the burst of activity.
-      let firedCount = 0
-      for (let j = 0; j < s.slots.length; j++) {
-        const sl = s.slots[j]
-        if (!sl.committed) continue
-        const r = resolveRecipe(s.id, sl.recipeId)
-        if (r) {
-          purseCredit(next.purse, r.out)
-          firedCount += 1
-        }
-        s.slots[j] = { ...sl, committed: false, state: 'active' }
-      }
-      if (firedCount > 0) {
-        next.attention = Math.min(
-          1,
-          next.attention + ATTENTION_REFILL_PER_FIRE * firedCount,
-        )
-        s.heat = Math.min(1, s.heat + HEAT_BUMP_PER_FIRE * firedCount)
-      }
-      // Phase B: try to commit fresh inputs for the next cycle.
-      for (let j = 0; j < s.slots.length; j++) {
-        s.slots[j] = tryCommit(s.slots[j], s.id, next.purse)
-      }
+    // Pass B: try to commit anything uncommitted — both freshly-fired slots
+    // and slots that were starved coming into this beat. Gens commit first
+    // by virtue of having no inputs, so the press downstream can grab the
+    // C that was just credited.
+    for (let j = 0; j < s.slots.length; j++) {
+      const slot = s.slots[j]
+      if (slot.state === 'empty' || slot.state === 'locked' || !slot.recipeId) continue
+      if (slot.committed) continue
+      s.slots[j] = tryCommit(slot, s.id, next.purse)
+    }
+
+    if (firedTotal > 0) {
+      next.attention = Math.min(
+        1,
+        next.attention + ATTENTION_REFILL_PER_FIRE * firedTotal,
+      )
+      s.heat = Math.min(1, s.heat + HEAT_BUMP_PER_FIRE * firedTotal)
     }
 
     s.alarm = s.heat < HEAT_COLD
@@ -356,8 +400,57 @@ export function swapSlotRecipe(
     state: 'active',
     recipeId: nextRecipeId,
     committed: false,
+    cycle: 0,
   }
   return next
+}
+
+// ── Upgrades ────────────────────────────────────────────────────────
+export function upgradeCost(id: UpgradeId, level: number): number {
+  const u = UPGRADES[id]
+  return Math.round(u.base * Math.pow(u.scale, level))
+}
+
+export function buyUpgrade(state: ShowState, id: UpgradeId): ShowState {
+  const level = state.upgrades[id]
+  const cost = upgradeCost(id, level)
+  const have = state.purse['∮'] ?? 0
+  if (have < cost) return state
+  return {
+    ...state,
+    purse: { ...state.purse, '∮': have - cost },
+    upgrades: { ...state.upgrades, [id]: level + 1 },
+  }
+}
+
+// Projected steady-state ∮/s for a single station given current upgrades
+// and slot mix. Computes raw produced/s vs raw consumed/s and reports the
+// refiner output limited by whichever is the bottleneck. Reported at the
+// recipe's own cadence (cycleSpeed = 1), so the display is stable and
+// matches what the player would see at 50% audience attention.
+export function projectedApplauseRate(state: ShowState, stationIdx: number): number {
+  const s = state.stations[stationIdx]
+  if (!s) return 0
+  let rawPerSec = 0
+  let consumePerSec = 0
+  let refOutPerSec = 0
+  for (const slot of s.slots) {
+    if (!slot.recipeId) continue
+    const r = effectiveRecipe(s.id, slot.recipeId, state.upgrades)
+    if (!r) continue
+    const cycle = slotCycleSeconds(s.id, r)
+    if (r.in.length === 0) {
+      rawPerSec += r.out.qty / cycle
+    } else {
+      // Single-input refiner assumption holds for the current Pit recipes.
+      consumePerSec += r.in[0].qty / cycle
+      refOutPerSec += r.out.qty / cycle
+    }
+  }
+  if (refOutPerSec === 0) return 0
+  if (consumePerSec === 0) return refOutPerSec
+  const fed = Math.min(1, rawPerSec / consumePerSec)
+  return refOutPerSec * fed
 }
 
 // Per-bar updates: planet stock drift, conjunction window countdown.

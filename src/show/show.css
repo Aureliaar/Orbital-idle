@@ -212,32 +212,97 @@
   z-index: 2;
 }
 
-.pit-add-station {
-  border: 1px dashed color-mix(in srgb, var(--text-h) 47%, transparent);
-  background: color-mix(in srgb, var(--bg2) 20%, transparent);
-  padding: 12px;
-  text-align: center;
-  position: relative;
+.pit-purse-spacer {
+  flex: 1;
 }
 
-.pit-add-station-title {
-  font-size: 15px;
-  font-style: italic;
+.pit-rate {
+  font-size: 9px;
   color: var(--text);
+  letter-spacing: 0.18em;
+  align-self: center;
+  border: 0.5px solid color-mix(in srgb, var(--text-h) 40%, transparent);
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+  padding: 3px 8px;
 }
 
-.pit-add-station-cost {
+.pit-rate-value {
+  color: var(--accent);
+  font-size: 12px;
+  margin-right: 3px;
+}
+
+.pit-upgrades {
+  border: 0.5px solid color-mix(in srgb, var(--text-h) 47%, transparent);
+  background: color-mix(in srgb, var(--bg2) 18%, transparent);
+  padding: 8px 10px 10px;
+}
+
+.pit-upgrades-header {
+  font-size: 8px;
+  color: var(--text-3);
+  letter-spacing: 0.2em;
+  margin-bottom: 6px;
+}
+
+.pit-upgrades-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pit-upgrade {
+  flex: 1;
+  border: 0.5px solid color-mix(in srgb, var(--text-h) 40%, transparent);
+  background: var(--paper);
+  padding: 6px 8px 7px;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pit-upgrade:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pit-upgrade[data-affordable='true'] {
+  border: 0.5px solid var(--accent);
+}
+
+.pit-upgrade-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.pit-upgrade-name {
+  font-size: 13px;
+  font-style: italic;
+}
+
+.pit-upgrade-level {
   font-size: 9px;
   color: var(--text-3);
+  letter-spacing: 0.18em;
+}
+
+.pit-upgrade-blurb {
+  font-size: 9px;
+  color: var(--text);
   margin-top: 2px;
 }
 
-.pit-add-station-cost .cost-amber {
+.pit-upgrade-cost {
+  font-size: 10px;
   color: var(--accent);
+  margin-top: 5px;
+  letter-spacing: 0.06em;
 }
 
-.pit-add-station-cost .cost-writ {
-  color: var(--text);
+.pit-upgrade-cost-mark {
+  color: var(--gold);
 }
 
 /* ── Condition badge ────────────────────────────────────────────── */
@@ -416,6 +481,23 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.slot-chip-cycle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--text-h) 14%, transparent);
+  overflow: hidden;
+}
+
+.slot-chip-cycle-fill {
+  display: block;
+  height: 100%;
+  background: var(--slot-color, var(--text-h));
+  opacity: 0.7;
 }
 
 /* ── Slot rack ──────────────────────────────────────────────────── */

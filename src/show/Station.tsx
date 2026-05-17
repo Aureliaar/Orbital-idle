@@ -18,8 +18,8 @@ import {
   STATION_CAPACITY,
   STATION_RECIPES,
 } from './data'
-import type { Condition, Slot, StationState } from './state'
-import { conditionOf } from './state'
+import type { Condition, Slot, StationState, Upgrades } from './state'
+import { conditionOf, effectiveRecipe } from './state'
 
 const CONDITION_GLYPH: Record<Condition, string> = {
   warm: '●',
@@ -110,6 +110,12 @@ function SlotChip({
         {starved && <span className="sc slot-chip-starve">!</span>}
       </div>
       <div className="mono slot-chip-recipe">{recipeLabel(r)}</div>
+      <span className="slot-chip-cycle" aria-hidden="true">
+        <span
+          className="slot-chip-cycle-fill"
+          style={{ width: `${Math.min(1, slot.cycle) * 100}%` }}
+        />
+      </span>
     </button>
   )
 }
@@ -120,6 +126,7 @@ function SlotRack({
   max,
   dense = false,
   stationId,
+  upgrades,
   onSwapSlot,
 }: {
   slots: Slot[]
@@ -127,30 +134,45 @@ function SlotRack({
   max: number
   dense?: boolean
   stationId: string
+  upgrades: Upgrades
   onSwapSlot?: (slot: number) => void
 }) {
   const lib = STATION_RECIPES[stationId] ?? []
-  const resolveRecipe = (slot: Slot) =>
-    slot.recipeId ? lib.find((r) => r.id === slot.recipeId) : undefined
+  const resolveRecipe = (slot: Slot): Recipe | undefined => {
+    if (!slot.recipeId) return undefined
+    const eff = effectiveRecipe(stationId, slot.recipeId, upgrades)
+    return eff ?? lib.find((r) => r.id === slot.recipeId)
+  }
 
   const filled: Array<Slot & { recipe?: Recipe }> = slots
     .slice(0, capacity)
     .map((s) => ({ ...s, recipe: resolveRecipe(s) }))
-  while (filled.length < capacity) filled.push({ state: 'empty' })
+  while (filled.length < capacity)
+    filled.push({ state: 'empty', cycle: 0 })
   const locked: Array<Slot & { recipe?: Recipe }> = Array.from(
     { length: Math.max(0, max - capacity) },
-    () => ({ state: 'locked' as const }),
+    () => ({ state: 'locked' as const, cycle: 0 }),
   )
   const all = [...filled, ...locked]
-  const activeCount = filled.filter((s) => s.state === 'active').length
+
+  // Count gens (no inputs) vs refs (with inputs) so the player can see the
+  // current mix at a glance — this is the central decision in the Pit.
+  let gens = 0
+  let refs = 0
+  for (const s of filled) {
+    if (!s.recipe) continue
+    if (s.recipe.in.length === 0) gens += 1
+    else refs += 1
+  }
+
   return (
     <div>
       {!dense && (
         <div className="sc slot-rack-header">
           <span>
-            slots{' '}
+            mix{' '}
             <span className="mono slot-rack-header-count">
-              {activeCount}/{capacity}
+              {gens}G·{refs}R
             </span>
           </span>
           <span>tap to swap</span>
@@ -174,12 +196,14 @@ function SlotRack({
 export function StationCard({
   idx,
   state,
+  upgrades,
   onTend,
   onRelight,
   onSwapSlot,
 }: {
   idx: number
   state: StationState
+  upgrades: Upgrades
   onTend?: () => void
   onRelight?: () => void
   onSwapSlot?: (slot: number) => void
@@ -214,7 +238,7 @@ export function StationCard({
         <div className="station-apparatus-cell">
           <Apparatus kind={state.id} condition={condition} />
           <div className="mono station-apparatus-cycle">
-            cycle {def.cycle}s{state.auto ? ' · ⚡' : ''}
+            {state.auto ? '⚡ ' : ''}per-slot clocks
           </div>
         </div>
         <div className="station-info-cell">
@@ -223,20 +247,8 @@ export function StationCard({
             capacity={state.capacity || STATION_CAPACITY[state.id] || 1}
             max={STATION_MAX_CAPACITY[state.id] || state.capacity || 1}
             stationId={state.id}
+            upgrades={upgrades}
             onSwapSlot={onSwapSlot}
-          />
-        </div>
-      </div>
-
-      <div className="station-meter-block">
-        <div className="sc station-meter-labels">
-          <span>cycle</span>
-          <span className="mono">{Math.round(state.cycle * 100)}%</span>
-        </div>
-        <div className="station-cycle-bar">
-          <span
-            className="station-cycle-fill"
-            style={{ width: `${state.cycle * 100}%` }}
           />
         </div>
       </div>

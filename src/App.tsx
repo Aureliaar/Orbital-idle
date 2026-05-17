@@ -13,6 +13,7 @@ import { ResearchStage } from './show/ResearchStage'
 import { WheelStage } from './show/WheelStage'
 import {
   BEAT_MS,
+  buyUpgrade,
   initialState,
   relightStation,
   swapSlotRecipe,
@@ -20,12 +21,14 @@ import {
   tickBeat,
   type ShowState,
 } from './show/state'
+import type { UpgradeId } from './show/data'
 
 export type ShowAction =
   | { type: 'beat' }
   | { type: 'tend'; station: number }
   | { type: 'relight'; station: number }
   | { type: 'swap'; station: number; slot: number }
+  | { type: 'buy'; upgrade: UpgradeId }
 function reducer(state: ShowState, action: ShowAction): ShowState {
   switch (action.type) {
     case 'beat':
@@ -36,6 +39,8 @@ function reducer(state: ShowState, action: ShowAction): ShowState {
       return relightStation(state, action.station)
     case 'swap':
       return swapSlotRecipe(state, action.station, action.slot)
+    case 'buy':
+      return buyUpgrade(state, action.upgrade)
   }
 }
 
