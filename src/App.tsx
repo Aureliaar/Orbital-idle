@@ -27,6 +27,7 @@ import type {
   CurrencyPurse,
   FreqCurrency,
 } from './harvest-config'
+import { OrbitEngraving, PageChrome } from './PageChrome'
 import { PlanetTile } from './PlanetTile'
 import { UpgradePanel } from './UpgradePanel'
 
@@ -1015,7 +1016,12 @@ function App() {
 
   return (
     <main>
-      <h1>Orbital</h1>
+      <PageChrome />
+      <div className="folio-mark" aria-hidden="true">
+        <span>Folio I · Recto</span>
+        <span>An. MMXXVI</span>
+      </div>
+      <h1>Orbital<span className="title-dot" aria-hidden="true">.</span></h1>
       <p className="tagline">
         {tab === 'orbits'
           ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
@@ -1029,7 +1035,9 @@ function App() {
           aria-selected={tab === 'orbits'}
           onClick={() => setTab('orbits')}
         >
-          Orbits
+          <span className="tab-cap" aria-hidden="true">Cap. I</span>
+          <span className="tab-name">Orbits</span>
+          <span className="tab-sub" aria-hidden="true">the diatonic wheel</span>
         </button>
         <button
           type="button"
@@ -1038,7 +1046,9 @@ function App() {
           aria-selected={tab === 'harvest'}
           onClick={() => setTab('harvest')}
         >
-          Resonator
+          <span className="tab-cap" aria-hidden="true">Cap. II</span>
+          <span className="tab-name">Resonator</span>
+          <span className="tab-sub" aria-hidden="true">plucks &amp; coincidences</span>
         </button>
       </nav>
       <section className="currencies-panel" aria-label="Currencies">
@@ -1159,11 +1169,14 @@ function App() {
             ))}
           </div>
         </div>
-        <canvas
-          ref={canvasRef}
-          className="orbit"
-          aria-label="Seven bodies on a diatonic wheel"
-        />
+        <div className="orbit-plate">
+          <OrbitEngraving />
+          <canvas
+            ref={canvasRef}
+            className="orbit"
+            aria-label="Seven bodies on a diatonic wheel"
+          />
+        </div>
         <ul className="tiles" role="list">
           {TARGETS.map((body) => (
             <li key={body.id}>
