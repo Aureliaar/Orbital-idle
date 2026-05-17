@@ -11,12 +11,32 @@ import { ShowCrown, StageTabs, type Tab } from './show/Crown'
 import { PitStage } from './show/PitStage'
 import { ResearchStage } from './show/ResearchStage'
 import { WheelStage } from './show/WheelStage'
-import { BEAT_MS, initialState, tickBeat, type ShowState } from './show/state'
+import {
+  BEAT_MS,
+  initialState,
+  relightStation,
+  swapSlotRecipe,
+  tendStation,
+  tickBeat,
+  type ShowState,
+} from './show/state'
 
-type Action = { type: 'beat' }
-function reducer(state: ShowState, action: Action): ShowState {
-  if (action.type === 'beat') return tickBeat(state)
-  return state
+export type ShowAction =
+  | { type: 'beat' }
+  | { type: 'tend'; station: number }
+  | { type: 'relight'; station: number }
+  | { type: 'swap'; station: number; slot: number }
+function reducer(state: ShowState, action: ShowAction): ShowState {
+  switch (action.type) {
+    case 'beat':
+      return tickBeat(state)
+    case 'tend':
+      return tendStation(state, action.station)
+    case 'relight':
+      return relightStation(state, action.station)
+    case 'swap':
+      return swapSlotRecipe(state, action.station, action.slot)
+  }
 }
 
 export default function App() {
@@ -55,7 +75,7 @@ export default function App() {
         />
         <StageTabs active={tab} onChange={setTab} />
         <div className="show-body">
-          {tab === 'pit' && <PitStage state={state} />}
+          {tab === 'pit' && <PitStage state={state} dispatch={dispatch} />}
           {tab === 'wheel' && <WheelStage state={state} />}
           {tab === 'research' && <ResearchStage state={state} />}
         </div>
