@@ -89,28 +89,13 @@
   inset: 10px;
 }
 
+/* On phones the chrome frame and corner ornaments collapse onto the
+   plate's own border and read as visual noise. Drop them; the paper
+   texture / foxing / vignette stay as background decor. */
 @media (max-width: 600px) {
-  .chrome-frame {
-    inset: 2px;
-  }
-  .chrome-frame-inner {
-    inset: 3px;
-  }
-  .chrome-corner[data-corner='tl'],
-  .chrome-corner[data-corner='bl'] {
-    left: 2px;
-  }
-  .chrome-corner[data-corner='tr'],
-  .chrome-corner[data-corner='br'] {
-    right: 2px;
-  }
-  .chrome-corner[data-corner='tl'],
-  .chrome-corner[data-corner='tr'] {
-    top: 2px;
-  }
-  .chrome-corner[data-corner='bl'],
-  .chrome-corner[data-corner='br'] {
-    bottom: 2px;
+  .chrome-frame,
+  .chrome-corners {
+    display: none;
   }
 }
 
