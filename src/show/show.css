@@ -955,10 +955,12 @@
 
 /* ── Mobile type bump ───────────────────────────────────────────── */
 /* The desktop scale is the engraver's-print aesthetic (8–11 px micro
-   labels). On phones those collapse into illegibility, so push the
-   smallest tier up by ~2 px without losing the look. */
+   labels). On phones the whole scale shifts up roughly one tier so
+   the smallest labels stay legible; some elements may need layout
+   rework eventually to absorb the larger glyphs. */
 
 @media (max-width: 600px) {
+  /* Micro labels — uppercase eyebrows, small-caps headers */
   .show-crown-meta,
   .attention-bar-labels,
   .stage-tab-eyebrow,
@@ -974,9 +976,10 @@
   .research-active-header,
   .research-active-tier-badge,
   .research-stations-label {
-    font-size: 10px;
+    font-size: 12px;
   }
 
+  /* Small body / inline data */
   .condition-badge,
   .slot-chip-empty-label,
   .slot-chip-locked-label,
@@ -993,26 +996,54 @@
   .research-tree-row,
   .research-active-footer,
   .research-active-body {
-    font-size: 11px;
+    font-size: 13px;
+  }
+
+  .station-card-badge,
+  .wheel-window-pair,
+  .research-active-pct {
+    font-size: 14px;
   }
 
   .coin-chip {
-    font-size: 13px;
+    font-size: 15px;
     padding: 3px 7px;
   }
 
   .coin-chip[data-size='lg'] {
-    font-size: 14px;
+    font-size: 16px;
     padding: 4px 9px;
   }
 
-  .show-crown-subtitle {
-    font-size: 13px;
+  /* Body / sub-display */
+  .show-crown-subtitle,
+  .stage-tab-title,
+  .pit-add-station-title,
+  .station-relight-icon {
+    font-size: 16px;
   }
 
-  .wheel-window-pair,
-  .research-active-pct {
-    font-size: 12px;
+  /* Display tier — italic headings */
+  .station-name,
+  .slot-chip-note {
+    font-size: 20px;
+  }
+
+  .research-active-title {
+    font-size: 22px;
+  }
+
+  .research-writ-amount,
+  .wheel-shuttle-note {
+    font-size: 24px;
+  }
+
+  .wheel-shuttle-arrow {
+    font-size: 26px;
+  }
+
+  .show-crown-title {
+    font-size: 30px;
   }
 
   /* The pit station row had asymmetric padding designed for a desktop
@@ -1027,5 +1058,7 @@
 
   .station-card-badge {
     left: -6px;
+    width: 24px;
+    height: 24px;
   }
 }
