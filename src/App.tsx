@@ -137,7 +137,6 @@ const noteYieldCost = (id: BodyId, lvl: number): CurrencyPurse => ({
   [FIFTH_NEXT[id]]: Math.round(NOTE_YIELD_BASE * COST_STEP ** lvl),
 })
 
-const PROBE_DURATION_S = 1.4
 const HALO_PROXIMITY = 0.93
 
 // Earth → C3 (130.81 Hz). Each body's just-intonation period ratio places it
@@ -150,7 +149,6 @@ const VOICE_PEAK_GAIN = 0.16
 const SWELL_ATTACK_TAU = 1.8
 const SWELL_DECAY_TAU = 3.5
 const SWELL_RELEASE_TAU = 0.55
-const LAUNCH_ARM_GAIN = VOICE_PEAK_GAIN * 0.55
 const REARM_TARGET = VOICE_FLOOR_GAIN + (VOICE_PEAK_GAIN - VOICE_FLOOR_GAIN) * 0.05
 
 const STRIKE_FLOOR_VELOCITY = 0.08
@@ -165,8 +163,6 @@ const TIMBRE_LABELS: Record<Timbre, string> = {
   synth: 'Synth',
 }
 
-type Probe = { startMs: number }
-type ArmedMap = Partial<Record<BodyId, boolean>>
 type VoiceState = { held: number; releasing: boolean; armed: boolean }
 type ToneVoice = {
   synth: PluckSynth | FMSynth | AMSynth
@@ -204,6 +200,43 @@ const buildSynth = (timbre: Timbre): PluckSynth | FMSynth | AMSynth => {
 }
 
 const ORBITS = [...BODIES].sort((a, b) => a.ratio - b.ratio)
+
+// Each planet keeps its own resonator: a private purse, its own unlock
+// ladder progress, slot loadout, slot upgrades, auto-pluck assignments,
+// and per-note yield levels. Switching planet swaps the entire slice; no
+// currency or progress crosses planet boundaries.
+type ResonatorState = {
+  currencies: CurrencyPurse
+  seenCurrencies: ReadonlySet<CurrencyKey>
+  unlockedIds: BodyId[]
+  slots: BodyId[][]
+  slotCount: number
+  slot0Capacity: number
+  autoPluckSlots: ReadonlySet<number>
+  noteYieldLvls: Partial<Record<BodyId, number>>
+}
+
+function initialResonator(planetId: BodyId): ResonatorState {
+  const slots: BodyId[][] = []
+  for (let i = 0; i < INITIAL_SLOT_COUNT; i++) slots.push([])
+  slots[0] = [planetId]
+  return {
+    currencies: {},
+    seenCurrencies: new Set<CurrencyKey>([planetId]),
+    unlockedIds: [planetId],
+    slots,
+    slotCount: INITIAL_SLOT_COUNT,
+    slot0Capacity: 1,
+    autoPluckSlots: new Set<number>(),
+    noteYieldLvls: {},
+  }
+}
+
+function initialResonators(): Record<BodyId, ResonatorState> {
+  const out = {} as Record<BodyId, ResonatorState>
+  for (const b of BODIES) out[b.id] = initialResonator(b.id)
+  return out
+}
 
 const formatCurrency = (v: number): string => {
   if (v >= 1000) return Math.floor(v).toLocaleString()
@@ -373,10 +406,6 @@ function ReadyBadge() {
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const progressRef = useRef<HTMLElement | null>(null)
-  const probesRef = useRef<Map<BodyId, Probe>>(new Map())
-  const armedRef = useRef<ArmedMap>({})
-  const [armed, setArmed] = useState<ArmedMap>({})
-  const [flying, setFlying] = useState<Set<BodyId>>(() => new Set())
   const [upgradeFor, setUpgradeFor] = useState<Body | null>(null)
   const [audioOn, setAudioOn] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false
@@ -385,22 +414,25 @@ function App() {
   const [timbre, setTimbre] = useState<Timbre>('piano')
   const audioRef = useRef<OrbitAudio | null>(null)
   const [tab, setTab] = useState<Tab>('harvest')
-  const [currencies, setCurrencies] = useState<CurrencyPurse>({})
-  const [seenCurrencies, setSeenCurrencies] = useState<Set<CurrencyKey>>(() => new Set(['C']))
-  const [unlockedIds, setUnlockedIds] = useState<BodyId[]>(['C'])
-  const [slotCount, setSlotCount] = useState(INITIAL_SLOT_COUNT)
-  const [slots, setSlots] = useState<BodyId[][]>(() => {
-    const init: BodyId[][] = []
-    for (let i = 0; i < INITIAL_SLOT_COUNT; i++) init.push([])
-    init[0] = ['C']
-    return init
-  })
-  const [slot0Capacity, setSlot0Capacity] = useState(1)
-  const [autoPluckSlots, setAutoPluckSlots] = useState<ReadonlySet<number>>(() => new Set())
-  const [noteYieldLvls, setNoteYieldLvls] = useState<Partial<Record<BodyId, number>>>({})
+  const [activePlanet, setActivePlanet] = useState<BodyId>('C')
+  const [resonators, setResonators] = useState<Record<BodyId, ResonatorState>>(initialResonators)
+  const active = resonators[activePlanet]
+  const { currencies, seenCurrencies, unlockedIds, slots, slotCount, slot0Capacity, autoPluckSlots, noteYieldLvls } = active
   const slotCapacities = useMemo(
     () => Array.from({ length: slotCount }, (_, i) => (i === 0 ? slot0Capacity : 1)),
     [slotCount, slot0Capacity],
+  )
+
+  const updateActive = useCallback(
+    (updater: (s: ResonatorState) => ResonatorState) => {
+      setResonators((prev) => {
+        const cur = prev[activePlanet]
+        const next = updater(cur)
+        if (next === cur) return prev
+        return { ...prev, [activePlanet]: next }
+      })
+    },
+    [activePlanet],
   )
 
   const noteYieldMul = useCallback(
@@ -413,26 +445,38 @@ function App() {
       (k) => (delta[k] ?? 0) > 0,
     )
     if (touched.length === 0) return
-    setCurrencies((prev) => addToPurse(prev, delta))
-    setSeenCurrencies((prev) => {
-      let changed = false
-      const next = new Set(prev)
+    updateActive((s) => {
+      let seen = s.seenCurrencies
+      let seenChanged = false
       for (const k of touched) {
-        if (!next.has(k)) {
-          next.add(k)
-          changed = true
+        if (!seen.has(k)) {
+          if (!seenChanged) {
+            seen = new Set(seen)
+            seenChanged = true
+          }
+          ;(seen as Set<CurrencyKey>).add(k)
         }
       }
-      return changed ? next : prev
+      return {
+        ...s,
+        currencies: addToPurse(s.currencies, delta),
+        seenCurrencies: seenChanged ? seen : s.seenCurrencies,
+      }
     })
-  }, [])
+  }, [updateActive])
 
   const swellsRef = useRef<Map<BodyId, VoiceState>>(
     new Map(TARGETS.map((b) => [b.id, { held: VOICE_FLOOR_GAIN, releasing: false, armed: true }])),
   )
-  const launchRequestRef = useRef<BodyId | null>(null)
   const phaseRef = useRef<Map<BodyId, number>>(new Map())
   const tabRef = useRef<Tab>(tab)
+  // The canvas raf reads this every frame to highlight the active planet's
+  // dot in its pad color. Kept as a ref so the draw loop doesn't need to be
+  // re-mounted (and its phase state reset) on every planet switch.
+  const activePlanetRef = useRef<BodyId>(activePlanet)
+  useEffect(() => {
+    activePlanetRef.current = activePlanet
+  }, [activePlanet])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -483,15 +527,6 @@ function App() {
       const earthPos = positions.find((p) => p.body.id === EARTH.id)!
 
       const swells = swellsRef.current
-      const launchedId = launchRequestRef.current
-      if (launchedId) {
-        launchRequestRef.current = null
-        const s = swells.get(launchedId)
-        if (s && s.held > VOICE_FLOOR_GAIN + 0.001) {
-          s.releasing = true
-          s.armed = false
-        }
-      }
 
       for (const { body, delta } of positions) {
         if (body.id === EARTH.id) continue
@@ -544,12 +579,6 @@ function App() {
         }
       }
 
-      const nextArmed: ArmedMap = {}
-      for (const body of TARGETS) {
-        const s = swells.get(body.id)
-        nextArmed[body.id] = !!(s && !s.releasing && s.held > LAUNCH_ARM_GAIN)
-      }
-
       ctx.strokeStyle = border
       ctx.lineWidth = 1
       for (const { r } of positions) {
@@ -585,58 +614,27 @@ function App() {
       ctx.arc(cx, cy, 2, 0, 2 * Math.PI)
       ctx.fill()
 
-      for (const { body, angle, r } of positions) {
+      // Body dot is the active planet's pad color when it's that planet,
+      // accent when in alignment with Earth (visual "window open" cue —
+      // even without launches it still teaches consonance), otherwise the
+      // soft text colour.
+      for (const { body, angle, r, delta } of positions) {
         const px = cx + Math.cos(angle) * r
         const py = cy + Math.sin(angle) * r
         const isEarth = body.id === EARTH.id
-        ctx.fillStyle = isEarth ? textH : nextArmed[body.id] ? accent : textM
+        const isActive = body.id === activePlanetRef.current
+        const proximity = 1 - delta / Math.PI
+        const aligned = !isEarth && proximity > 0.85
+        ctx.fillStyle = isActive
+          ? PAD_COLORS[body.id] ?? accent
+          : isEarth
+            ? textH
+            : aligned
+              ? accent
+              : textM
         ctx.beginPath()
-        ctx.arc(px, py, isEarth ? 6 : 5, 0, 2 * Math.PI)
+        ctx.arc(px, py, isEarth ? 6 : isActive ? 6 : 5, 0, 2 * Math.PI)
         ctx.fill()
-      }
-
-      const toRemove: BodyId[] = []
-      probesRef.current.forEach((probe, id) => {
-        const u = (now - probe.startMs) / 1000 / PROBE_DURATION_S
-        if (u >= 1) {
-          toRemove.push(id)
-          return
-        }
-        const target = positions.find((p) => p.body.id === id)
-        if (!target) return
-        const r = earthPos.r + (target.r - earthPos.r) * u
-        let delta = (target.angle - earthAngle) % (2 * Math.PI)
-        if (delta > Math.PI) delta -= 2 * Math.PI
-        if (delta < -Math.PI) delta += 2 * Math.PI
-        const angle = earthAngle + delta * u
-        const px = cx + Math.cos(angle) * r
-        const py = cy + Math.sin(angle) * r
-        ctx.fillStyle = accent
-        ctx.beginPath()
-        ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
-        ctx.fill()
-      })
-      if (toRemove.length) {
-        for (const id of toRemove) probesRef.current.delete(id)
-        setFlying((prev) => {
-          if (toRemove.every((id) => !prev.has(id))) return prev
-          const next = new Set(prev)
-          for (const id of toRemove) next.delete(id)
-          return next
-        })
-      }
-
-      const prevArmed = armedRef.current
-      let changed = false
-      for (const body of TARGETS) {
-        if ((prevArmed[body.id] ?? false) !== (nextArmed[body.id] ?? false)) {
-          changed = true
-          break
-        }
-      }
-      if (changed) {
-        armedRef.current = nextArmed
-        setArmed(nextArmed)
       }
 
       raf = requestAnimationFrame(draw)
@@ -756,109 +754,153 @@ function App() {
     [slots, autoPluckSlots, noteYieldLvls],
   )
   const anyAutoPluck = autoPluckSlots.size > 0
-  const idleHasFlow = useMemo(
-    () => Object.values(idleRate).some((v) => (v ?? 0) > 0),
-    [idleRate],
-  )
 
-  // Off-tab idle accrual. The on-tab auto-pluck path credits directly via
-  // handleSlot → onEarn → earn(); running this ticker simultaneously would
-  // double-count. Mark seen currencies for everything the rate produces so
-  // chips appear in the UI even if the player is away.
+  // Per-planet idle accrual. Every planet's resonator gets its auto-pluck
+  // rate credited to its own purse. The active planet is fed by HarvestStage's
+  // live auto-pluck timers (which call earn → updateActive) while the player
+  // is on the Resonator tab, so we skip it here to avoid double-counting;
+  // every other planet, and the active planet whenever the player is on the
+  // Orbits tab, accrues here. Stays one interval covering all 7 planets so
+  // their clocks share a single dt and don't drift apart.
   useEffect(() => {
-    if (!anyAutoPluck) return
-    if (tab === 'harvest') return
-    if (!idleHasFlow) return
     let last = performance.now()
     const id = window.setInterval(() => {
       const now = performance.now()
       const dt = (now - last) / 1000
       last = now
-      const delta: CurrencyPurse = {}
-      for (const k of Object.keys(idleRate) as CurrencyKey[]) {
-        const rate = idleRate[k] ?? 0
-        if (rate > 0) delta[k] = rate * dt
-      }
-      if (Object.keys(delta).length > 0) earn(delta)
+      if (dt <= 0) return
+      setResonators((prev) => {
+        let nextRecord: Record<BodyId, ResonatorState> | null = null
+        for (const b of BODIES) {
+          const planetId = b.id
+          if (planetId === activePlanet && tabRef.current === 'harvest') continue
+          const s = prev[planetId]
+          if (s.autoPluckSlots.size === 0) continue
+          const rate = computeIdleRate(s.slots, s.autoPluckSlots, s.noteYieldLvls, YIELD_STEP)
+          const delta: CurrencyPurse = {}
+          let any = false
+          for (const k of Object.keys(rate) as CurrencyKey[]) {
+            const r = rate[k] ?? 0
+            if (r > 0) {
+              delta[k] = r * dt
+              any = true
+            }
+          }
+          if (!any) continue
+          let seen = s.seenCurrencies
+          let seenChanged = false
+          for (const k of Object.keys(delta) as CurrencyKey[]) {
+            if (!seen.has(k)) {
+              if (!seenChanged) {
+                seen = new Set(seen)
+                seenChanged = true
+              }
+              ;(seen as Set<CurrencyKey>).add(k)
+            }
+          }
+          if (!nextRecord) nextRecord = { ...prev }
+          nextRecord[planetId] = {
+            ...s,
+            currencies: addToPurse(s.currencies, delta),
+            seenCurrencies: seenChanged ? seen : s.seenCurrencies,
+          }
+        }
+        return nextRecord ?? prev
+      })
     }, 250)
     return () => window.clearInterval(id)
-  }, [tab, anyAutoPluck, idleHasFlow, idleRate, earn])
+  }, [activePlanet])
 
   const handleSlotChange = useCallback((slotIdx: number, newNotes: readonly BodyId[]) => {
-    setSlots((prev) => {
-      const next = prev.map((s) => s.slice())
+    updateActive((s) => {
+      const next = s.slots.map((row) => row.slice())
       for (const note of newNotes) {
         for (let i = 0; i < next.length; i++) {
           if (i !== slotIdx) next[i] = next[i].filter((n) => n !== note)
         }
       }
       next[slotIdx] = newNotes.slice()
-      return next
+      return { ...s, slots: next }
     })
-  }, [])
-
-  const spendIfAffordable = useCallback(
-    (cost: CurrencyPurse): boolean => {
-      if (!canAffordPurse(currencies, cost)) return false
-      setCurrencies((prev) => subtractCost(prev, cost))
-      return true
-    },
-    [currencies],
-  )
+  }, [updateActive])
 
   const handleUnlock = useCallback((id: BodyId) => {
-    if (unlockedIds.includes(id)) return
-    const cost = UNLOCK_COSTS[id]
-    if (!spendIfAffordable(cost)) return
-    setUnlockedIds((prev) => [...prev, id])
-    setSeenCurrencies((prev) => {
-      if (prev.has(id)) return prev
-      const next = new Set(prev)
-      next.add(id)
-      return next
+    updateActive((s) => {
+      if (s.unlockedIds.includes(id)) return s
+      const cost = UNLOCK_COSTS[id]
+      if (!canAffordPurse(s.currencies, cost)) return s
+      const seen = s.seenCurrencies.has(id) ? s.seenCurrencies : new Set(s.seenCurrencies).add(id)
+      return {
+        ...s,
+        currencies: subtractCost(s.currencies, cost),
+        unlockedIds: [...s.unlockedIds, id],
+        seenCurrencies: seen,
+      }
     })
-  }, [unlockedIds, spendIfAffordable])
+  }, [updateActive])
 
   const handleUnlockAutoPluck = useCallback((slotIdx: number) => {
-    if (autoPluckSlots.has(slotIdx)) return
-    if (slotIdx >= slotCount) return
-    if (unlockedIds.length < AUTO_PLUCK_MIN_UNLOCKS) return
-    const cost = autoPluckCost(slotIdx)
-    if (!spendIfAffordable(cost)) return
-    setAutoPluckSlots((prev) => {
-      const next = new Set(prev)
-      next.add(slotIdx)
-      return next
+    updateActive((s) => {
+      if (s.autoPluckSlots.has(slotIdx)) return s
+      if (slotIdx >= s.slotCount) return s
+      if (s.unlockedIds.length < AUTO_PLUCK_MIN_UNLOCKS) return s
+      const cost = autoPluckCost(slotIdx)
+      if (!canAffordPurse(s.currencies, cost)) return s
+      const nextAuto = new Set(s.autoPluckSlots)
+      nextAuto.add(slotIdx)
+      return {
+        ...s,
+        currencies: subtractCost(s.currencies, cost),
+        autoPluckSlots: nextAuto,
+      }
     })
-  }, [autoPluckSlots, slotCount, unlockedIds.length, spendIfAffordable])
+  }, [updateActive])
 
   const handleUnlockSlot = useCallback(() => {
-    const nextIdx = slotCount
-    if (nextIdx >= MAX_SLOT_COUNT) return
-    const cost = SLOT_UNLOCK_COSTS[nextIdx + 1]
-    if (!cost) return
-    if (!spendIfAffordable(cost)) return
-    setSlotCount((c) => c + 1)
-    setSlots((prev) => [...prev, []])
-  }, [slotCount, spendIfAffordable])
+    updateActive((s) => {
+      const nextIdx = s.slotCount
+      if (nextIdx >= MAX_SLOT_COUNT) return s
+      const cost = SLOT_UNLOCK_COSTS[nextIdx + 1]
+      if (!cost) return s
+      if (!canAffordPurse(s.currencies, cost)) return s
+      return {
+        ...s,
+        currencies: subtractCost(s.currencies, cost),
+        slotCount: s.slotCount + 1,
+        slots: [...s.slots, []],
+      }
+    })
+  }, [updateActive])
 
   const handleUpgradeSlot0Capacity = useCallback(() => {
-    const nextCap = slot0Capacity + 1
-    if (nextCap > MAX_SLOT0_CAPACITY) return
-    const cost = SLOT0_CAPACITY_COSTS[nextCap]
-    if (!cost) return
-    if (!spendIfAffordable(cost)) return
-    setSlot0Capacity(nextCap)
-  }, [slot0Capacity, spendIfAffordable])
+    updateActive((s) => {
+      const nextCap = s.slot0Capacity + 1
+      if (nextCap > MAX_SLOT0_CAPACITY) return s
+      const cost = SLOT0_CAPACITY_COSTS[nextCap]
+      if (!cost) return s
+      if (!canAffordPurse(s.currencies, cost)) return s
+      return {
+        ...s,
+        currencies: subtractCost(s.currencies, cost),
+        slot0Capacity: nextCap,
+      }
+    })
+  }, [updateActive])
 
   const buyNoteYield = useCallback(
     (id: BodyId) => {
-      const lvl = noteYieldLvls[id] ?? 0
-      const cost = noteYieldCost(id, lvl)
-      if (!spendIfAffordable(cost)) return
-      setNoteYieldLvls((prev) => ({ ...prev, [id]: lvl + 1 }))
+      updateActive((s) => {
+        const lvl = s.noteYieldLvls[id] ?? 0
+        const cost = noteYieldCost(id, lvl)
+        if (!canAffordPurse(s.currencies, cost)) return s
+        return {
+          ...s,
+          currencies: subtractCost(s.currencies, cost),
+          noteYieldLvls: { ...s.noteYieldLvls, [id]: lvl + 1 },
+        }
+      })
     },
-    [noteYieldLvls, spendIfAffordable],
+    [updateActive],
   )
 
   // Progressive disclosure: only show 1 card per category at any time so the
@@ -972,16 +1014,12 @@ function App() {
     progressRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
-  const onLaunch = useCallback((body: Body) => {
-    if (!armedRef.current[body.id]) return
-    if (probesRef.current.has(body.id)) return
-    probesRef.current.set(body.id, { startMs: performance.now() })
-    launchRequestRef.current = body.id
-    setFlying((prev) => {
-      const next = new Set(prev)
-      next.add(body.id)
-      return next
-    })
+  // Tapping a planet routes to that planet's resonator. Each planet has its
+  // own isolated purse, ladder, slots, and yield levels — switching planet
+  // swaps the entire slice the Resonator tab is wired to.
+  const onActivatePlanet = useCallback((body: Body) => {
+    setActivePlanet(body.id)
+    setTab('harvest')
   }, [])
 
   const visibleNoteCurrencies = NOTE_CURRENCIES.filter(
@@ -1024,8 +1062,8 @@ function App() {
       <h1>Orbital<span className="title-dot" aria-hidden="true">.</span></h1>
       <p className="tagline">
         {tab === 'orbits'
-          ? 'Diatonic wheel · Earth tonic · tap to launch, hold to upgrade'
-          : 'Resonator · every note mints its own currency · land coincidences to mint H2..H6'}
+          ? 'Diatonic wheel · tap a body to enter its resonator · hold for details'
+          : `Resonator · ${BODIES.find((b) => b.id === activePlanet)?.name ?? activePlanet} (${activePlanet}) · isolated purse, ladder, and slots`}
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
         <button
@@ -1178,13 +1216,12 @@ function App() {
           />
         </div>
         <ul className="tiles" role="list">
-          {TARGETS.map((body) => (
+          {BODIES.map((body) => (
             <li key={body.id}>
               <PlanetTile
                 body={body}
-                armed={armed[body.id] ?? false}
-                flying={flying.has(body.id)}
-                onLaunch={() => onLaunch(body)}
+                active={body.id === activePlanet}
+                onActivate={() => onActivatePlanet(body)}
                 onLongPress={() => setUpgradeFor(body)}
               />
             </li>
@@ -1196,7 +1233,35 @@ function App() {
       </section>
       {tab === 'harvest' && (
         <>
+          {(() => {
+            const planet = BODIES.find((b) => b.id === activePlanet)
+            const color = PAD_COLORS[activePlanet] ?? 'var(--accent)'
+            return (
+              <section
+                className="resonator-active"
+                aria-label="Active resonator"
+                style={{ ['--chip-color' as string]: color }}
+              >
+                <span className="resonator-active-swatch" aria-hidden="true" />
+                <span className="resonator-active-label">
+                  <span className="resonator-active-kicker">Resonator</span>
+                  <span className="resonator-active-name">
+                    {planet?.name ?? activePlanet} <span className="resonator-active-note">· {activePlanet}</span>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="resonator-active-switch"
+                  onClick={() => setTab('orbits')}
+                  aria-label="Switch planet — back to orbits"
+                >
+                  switch ↗
+                </button>
+              </section>
+            )
+          })()}
           <HarvestStage
+            key={activePlanet}
             unlockedIds={unlockedIds}
             slots={slots}
             slotCount={slotCount}

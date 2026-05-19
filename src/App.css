@@ -33,6 +33,7 @@ main > .tabs,
 main > .currencies-panel,
 main > .stage,
 main > .harvest,
+main > .resonator-active,
 main > .resonator-progress,
 main > .upgrade-overlay {
   position: relative;
@@ -155,15 +156,12 @@ main h1 {
   transform: scale(0.98);
 }
 
-.tile.armed {
+.tile.active {
   border-color: var(--accent);
   background: var(--accent-bg);
   color: var(--accent);
 }
 
-.tile.flying {
-  border-style: dashed;
-}
 
 .tile-progress {
   position: absolute;
@@ -197,7 +195,7 @@ main h1 {
   font-weight: 500;
 }
 
-.tile.armed .tile-note {
+.tile.active .tile-note {
   color: var(--accent);
 }
 
@@ -218,7 +216,7 @@ main h1 {
   text-overflow: ellipsis;
 }
 
-.tile.armed .tile-name {
+.tile.active .tile-name {
   color: var(--accent);
 }
 
@@ -237,7 +235,7 @@ main h1 {
   color: var(--text-3);
 }
 
-.tile.armed .tile-status {
+.tile.active .tile-status {
   color: var(--accent);
 }
 
@@ -1335,6 +1333,78 @@ main h1 {
   font-size: 1rem;
   text-align: center;
   color: var(--accent);
+}
+
+/* --- Active resonator banner: which planet's instance is loaded. --- */
+
+.resonator-active {
+  width: min(720px, 96vw);
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0.5px solid var(--rule-thin);
+  border-left: 2px solid var(--chip-color, var(--accent));
+  background: var(--paper);
+}
+
+.resonator-active-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chip-color, var(--accent));
+  flex: 0 0 auto;
+}
+
+.resonator-active-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.resonator-active-kicker {
+  font-family: var(--sc);
+  font-size: 0.58rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.resonator-active-name {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--chip-color, var(--text-h));
+  line-height: 1.2;
+}
+
+.resonator-active-note {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.resonator-active-switch {
+  flex: 0 0 auto;
+  border: 0.5px solid var(--rule-thin);
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--sc);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.resonator-active-switch:hover {
+  border-color: var(--text-h);
+  color: var(--text-h);
 }
 
 /* --- Progression: idle rate + unlock cards + yield upgrades --- */
