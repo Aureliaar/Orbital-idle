@@ -6,13 +6,12 @@ const LONG_PRESS_MS = 420
 
 type Props = {
   body: Body
-  armed: boolean
-  flying: boolean
-  onLaunch: () => void
+  active: boolean
+  onActivate: () => void
   onLongPress: () => void
 }
 
-export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props) {
+export function PlanetTile({ body, active, onActivate, onLongPress }: Props) {
   const timerRef = useRef<number | null>(null)
   const longFiredRef = useRef(false)
   const [pressing, setPressing] = useState(false)
@@ -43,8 +42,8 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
     const wasShort = timerRef.current !== null
     clearTimer()
     setPressing(false)
-    if (wasShort && !longFiredRef.current && armed && !flying) {
-      onLaunch()
+    if (wasShort && !longFiredRef.current) {
+      onActivate()
     }
   }
 
@@ -55,9 +54,8 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
 
   const className = [
     'tile',
-    armed ? 'armed' : '',
+    active ? 'active' : '',
     pressing ? 'pressing' : '',
-    flying ? 'flying' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -71,7 +69,8 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
       onPointerCancel={onPointerCancel}
       onPointerLeave={onPointerCancel}
       onContextMenu={(e) => e.preventDefault()}
-      aria-label={`Launch to ${body.name}. Long-press to upgrade.`}
+      aria-label={`Open ${body.name}'s resonator. Long-press for details.`}
+      aria-pressed={active}
     >
       <span className="tile-progress" aria-hidden="true" />
       <span className="tile-row">
@@ -81,7 +80,7 @@ export function PlanetTile({ body, armed, flying, onLaunch, onLongPress }: Props
       <span className="tile-name">{body.name}</span>
       <span className="tile-interval">{body.intervalLabel}</span>
       <span className="tile-status" aria-hidden="true">
-        {flying ? 'in transit' : armed ? 'window open' : '—'}
+        {active ? 'active resonator' : 'tap to enter'}
       </span>
     </button>
   )
