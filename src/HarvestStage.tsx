@@ -980,8 +980,8 @@ export function HarvestStage({
                 fontFamily="ui-monospace, Menlo, Consolas, monospace"
                 fontSize="13"
                 fontWeight={isOn ? 600 : 400}
-                fill={color}
-                fillOpacity={isOn ? 1 : 0.55}
+                fill={isOn ? color : '#1a120a'}
+                fillOpacity={isOn ? 1 : 0.75}
               >
                 {body.id}
               </text>

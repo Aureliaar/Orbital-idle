@@ -623,16 +623,16 @@ main h1 {
 }
 
 .tab.on {
-  color: var(--text-h);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--text-h);
+  color: var(--bg);
 }
 
 .tab.on .tab-cap {
-  color: var(--accent);
+  color: var(--rust-soft);
 }
 
 .tab.on .tab-sub {
-  color: var(--text);
+  color: var(--paper);
   opacity: 0.85;
 }
 
