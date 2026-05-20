@@ -48,7 +48,7 @@ main > .upgrade-overlay {
 }
 
 .folio-mark {
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
   display: flex;
   justify-content: space-between;
   font-family: var(--mono);
@@ -123,7 +123,7 @@ main h1 {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
 }
 
 @media (max-width: 720px) {
@@ -576,7 +576,7 @@ main h1 {
   border-top: 0.5px solid var(--text-h);
   border-bottom: 0.5px solid var(--text-h);
   border-radius: 0;
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
 }
 
 .tab {
@@ -642,7 +642,7 @@ main h1 {
 /* --- Currency readout --- */
 
 .currencies-panel {
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -897,7 +897,7 @@ main h1 {
 /* --- Harvest stage --- */
 
 .harvest {
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1341,7 +1341,7 @@ main h1 {
 /* --- Active resonator banner: which planet's instance is loaded. --- */
 
 .resonator-active {
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
   margin: 0 0 6px;
   padding: 8px 12px;
   display: flex;
@@ -1394,7 +1394,7 @@ main h1 {
 /* --- Progression: idle rate + unlock cards + yield upgrades --- */
 
 .resonator-progress {
-  width: min(720px, 96vw);
+  width: min(720px, 100%);
   display: flex;
   flex-direction: column;
   gap: 16px;
