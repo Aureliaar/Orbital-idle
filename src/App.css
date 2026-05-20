@@ -13,7 +13,11 @@ main {
   justify-content: flex-start;
   align-items: center;
   gap: 12px;
-  padding: 28px 22px 36px;
+  padding:
+    max(28px, calc(env(safe-area-inset-top) + 16px))
+    max(22px, env(safe-area-inset-right))
+    max(36px, calc(env(safe-area-inset-bottom) + 20px))
+    max(22px, env(safe-area-inset-left));
   text-align: center;
   background: var(--bg);
   overflow: hidden;
@@ -1174,6 +1178,7 @@ main h1 {
   width: 100%;
   max-width: 440px;
   max-height: 85dvh;
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--paper);
   border: 1px solid var(--text-h);
   border-bottom: 0;
