@@ -11,25 +11,26 @@ const INK = '#1a120a'
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 
-function CornerOrnament({ corner, size = 60, color = INK }: { corner: Corner; size?: number; color?: string }) {
+function CornerOrnament({ corner, color = INK }: { corner: Corner; color?: string }) {
   const transforms: Record<Corner, string> = {
     tl: 'scale(1,1)',
     tr: 'scale(-1,1)',
     bl: 'scale(1,-1)',
     br: 'scale(-1,-1)',
   }
-  const positions: Record<Corner, { left?: number; right?: number; top?: number; bottom?: number }> = {
-    tl: { left: 6, top: 6 },
-    tr: { right: 6, top: 6 },
-    bl: { left: 6, bottom: 6 },
-    br: { right: 6, bottom: 6 },
+  const edge = 'var(--frame-edge)'
+  const positions: Record<Corner, { left?: string; right?: string; top?: string; bottom?: string }> = {
+    tl: { left: edge, top: edge },
+    tr: { right: edge, top: edge },
+    bl: { left: edge, bottom: edge },
+    br: { right: edge, bottom: edge },
   }
   return (
     <div
       style={{
         position: 'absolute',
-        width: size,
-        height: size,
+        width: 'var(--frame-corner)',
+        height: 'var(--frame-corner)',
         transform: transforms[corner],
         ...positions[corner],
       }}
@@ -51,9 +52,9 @@ function CornerOrnament({ corner, size = 60, color = INK }: { corner: Corner; si
   )
 }
 
-function FrameBorder({ inset = 10, color = INK }: { inset?: number; color?: string }) {
+function FrameBorder({ color = INK }: { color?: string }) {
   return (
-    <div style={{ position: 'absolute', inset, pointerEvents: 'none' }}>
+    <div style={{ position: 'absolute', inset: 'var(--frame-inset)', pointerEvents: 'none' }}>
       <div style={{ position: 'absolute', inset: 0, border: `1px solid ${color}` }} />
       <div style={{ position: 'absolute', inset: 4, border: `0.5px solid ${color}`, opacity: 0.6 }} />
     </div>

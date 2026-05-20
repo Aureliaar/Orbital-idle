@@ -13,11 +13,14 @@ main {
   justify-content: flex-start;
   align-items: center;
   gap: 12px;
+  /* Padding clears the page-chrome ornaments: top/bottom = corner footprint
+     + breathing room; sides = double-rule frame inset + breathing room. iOS
+     safe-area insets still win when larger (notch / home indicator). */
   padding:
-    max(28px, env(safe-area-inset-top))
-    max(22px, env(safe-area-inset-right))
-    max(36px, env(safe-area-inset-bottom))
-    max(22px, env(safe-area-inset-left));
+    max(var(--frame-safe-y), env(safe-area-inset-top))
+    max(var(--frame-safe-x), env(safe-area-inset-right))
+    max(var(--frame-safe-y), env(safe-area-inset-bottom))
+    max(var(--frame-safe-x), env(safe-area-inset-left));
   text-align: center;
   background: var(--bg);
   overflow: hidden;
