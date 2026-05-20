@@ -929,7 +929,7 @@ main h1 {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 22px 12px 18px;
+  padding: 22px 20px 18px;
   border: 0;
   border-left: 2px solid var(--pad-color);
   border-radius: 0;
@@ -1500,7 +1500,7 @@ main h1 {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  padding: 12px 14px 16px;
+  padding: 14px 20px 16px;
   border: 0;
   border-left: 2px solid color-mix(in srgb, var(--chip-color) 60%, transparent);
   border-radius: 0;
