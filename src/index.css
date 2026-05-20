@@ -6,7 +6,10 @@
      be plain hex / rgba strings (not color-mix()) to stay valid fillStyles. */
   --bg: #c9b487;            /* parchment page tone */
   --bg2: #b89e6a;           /* shadowed edge */
-  --paper: #d6c293;         /* raised highlight / inset panel */
+  --paper: #c9b487;         /* same as --bg: cards sit flat on the page,
+                               defined by ink rules / outlines, not shade.
+                               Keep separate from --bg so a future "raised"
+                               variant can re-tint it without a global edit. */
   --text: #3d2c1a;          /* walnut body text */
   --text-h: #1a120a;        /* iron-gall ink for headings */
   --text-3: #6b5536;        /* faded ink for captions */
