@@ -67,43 +67,49 @@ function Foxing() {
       seed.v = (seed.v * 9301 + 49297) % 233280
       return seed.v / 233280
     }
-    return Array.from({ length: 14 }, () => ({
-      x: r() * 100,
-      y: r() * 100,
-      rx: r() * 4 + 1.5,
-      ry: r() * 3 + 1,
-      rot: r() * 360,
-      op: r() * 0.4 + 0.15,
-    }))
+    return Array.from({ length: 22 }, () => {
+      const base = r() * 8 + 3
+      const skew = (r() - 0.5) * 0.5
+      return {
+        x: r() * 100,
+        y: r() * 100,
+        w: base * (1 + skew),
+        h: base * (1 - skew),
+        rot: r() * 360,
+        op: r() * 0.45 + 0.12,
+      }
+    })
   }, [])
   return (
-    <svg
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
+    <div
+      aria-hidden="true"
       style={{
         position: 'absolute',
         inset: 0,
         width: '100%',
         height: '100%',
         pointerEvents: 'none',
-        opacity: 0.35,
+        opacity: 0.4,
         mixBlendMode: 'multiply',
       }}
-      aria-hidden="true"
     >
       {spots.map((s, i) => (
-        <ellipse
+        <div
           key={i}
-          cx={s.x}
-          cy={s.y}
-          rx={s.rx}
-          ry={s.ry}
-          transform={`rotate(${s.rot} ${s.x} ${s.y})`}
-          fill="#5a3818"
-          opacity={s.op}
+          style={{
+            position: 'absolute',
+            left: `${s.x}%`,
+            top: `${s.y}%`,
+            width: `${s.w}px`,
+            height: `${s.h}px`,
+            borderRadius: '50%',
+            background: '#5a3818',
+            opacity: s.op,
+            transform: `translate(-50%, -50%) rotate(${s.rot}deg)`,
+          }}
         />
       ))}
-    </svg>
+    </div>
   )
 }
 
