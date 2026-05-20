@@ -13,7 +13,11 @@ main {
   justify-content: flex-start;
   align-items: center;
   gap: 12px;
-  padding: 28px 22px 36px;
+  padding:
+    max(28px, env(safe-area-inset-top))
+    max(22px, env(safe-area-inset-right))
+    max(36px, env(safe-area-inset-bottom))
+    max(22px, env(safe-area-inset-left));
   text-align: center;
   background: var(--bg);
   overflow: hidden;
@@ -680,7 +684,7 @@ main h1 {
   align-items: baseline;
   gap: 6px;
   padding: 4px 10px;
-  border: 0.5px solid var(--chip-color);
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
   background: color-mix(in srgb, var(--chip-color) 8%, var(--paper));
   font-family: var(--mono);
@@ -904,10 +908,7 @@ main h1 {
   aspect-ratio: 1;
   margin: 0 auto;
   display: block;
-  border: 0.5px solid var(--rule-thin);
-  border-radius: 0;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 4px var(--bg);
+  background: transparent;
 }
 
 .pads {
@@ -928,10 +929,10 @@ main h1 {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 22px 12px 18px;
-  border: 0.5px solid var(--pad-color);
+  padding: 24px 22px 20px;
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
-  background: color-mix(in srgb, var(--pad-color) 8%, var(--paper));
+  background: var(--paper);
   color: var(--text-h);
   font: inherit;
   font-family: var(--sans);
@@ -939,7 +940,7 @@ main h1 {
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  transition: border-color 140ms ease, background 140ms ease, transform 60ms ease;
+  transition: border-color 140ms ease, transform 60ms ease;
 }
 
 .pad:hover {
@@ -947,7 +948,6 @@ main h1 {
 }
 
 .pad:active {
-  background: color-mix(in srgb, var(--pad-color) 18%, var(--paper));
   border-color: var(--text-h);
   transform: scale(0.97);
 }
@@ -1057,9 +1057,8 @@ main h1 {
 
 .pad.empty {
   --pad-color: var(--accent);
-  border-style: dashed;
-  border-width: 1.5px;
-  background: color-mix(in srgb, var(--accent) 6%, var(--paper));
+  border: 1.5px dashed var(--accent);
+  background: var(--paper);
   animation: empty-pulse 3.6s ease-in-out infinite;
   cursor: default;
 }
@@ -1174,6 +1173,7 @@ main h1 {
   width: 100%;
   max-width: 440px;
   max-height: 85dvh;
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--paper);
   border: 1px solid var(--text-h);
   border-bottom: 0;
@@ -1344,9 +1344,9 @@ main h1 {
   display: flex;
   align-items: center;
   gap: 10px;
-  border: 0.5px solid var(--rule-thin);
+  border: 0;
   border-left: 2px solid var(--chip-color, var(--accent));
-  background: var(--paper);
+  background: transparent;
 }
 
 .resonator-active-swatch {
@@ -1386,25 +1386,6 @@ main h1 {
   font-style: normal;
   font-size: 0.78rem;
   color: var(--text);
-}
-
-.resonator-active-switch {
-  flex: 0 0 auto;
-  border: 0.5px solid var(--rule-thin);
-  background: var(--paper);
-  color: var(--text);
-  font-family: var(--sc);
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 4px 8px;
-  cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease;
-}
-
-.resonator-active-switch:hover {
-  border-color: var(--text-h);
-  color: var(--text-h);
 }
 
 /* --- Progression: idle rate + unlock cards + yield upgrades --- */
@@ -1497,7 +1478,7 @@ main h1 {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
 .unlocks {
@@ -1519,34 +1500,26 @@ main h1 {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  padding: 12px 14px 16px;
-  border: 0.5px solid color-mix(in srgb, var(--chip-color) 60%, transparent);
+  padding: 18px 22px 20px;
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
-  background: color-mix(in srgb, var(--chip-color) 4%, var(--paper));
+  background: var(--paper);
   text-align: left;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition: border-color 140ms ease;
 }
 
 .unlock:hover,
 .upgrade:hover {
-  border-color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 8%, var(--paper));
+  border-color: var(--text-h);
 }
 
 .unlock.next {
   border-color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 8%, var(--paper));
 }
 
-.unlock.unlock-slot {
-  border-style: dashed;
-  border-width: 1px;
-  grid-column: 1 / -1;
-}
-
+.unlock.unlock-slot,
 .unlock.unlock-stack {
   border-style: dashed;
-  border-width: 1px;
   grid-column: 1 / -1;
 }
 
@@ -1603,8 +1576,8 @@ main h1 {
 .unlock-btn,
 .upgrade-btn {
   align-self: stretch;
-  margin-top: 4px;
-  padding: 7px 10px;
+  margin-top: 6px;
+  padding: 10px 14px;
   border: 0.5px solid var(--chip-color);
   border-radius: 0;
   background: transparent;
@@ -1723,14 +1696,13 @@ main h1 {
 .unlock.affordable,
 .upgrade.affordable {
   border-color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 12%, var(--paper));
 }
 
 .unlock.affordable .unlock-btn,
 .upgrade.affordable .upgrade-btn {
   border-color: var(--text-h);
   border-width: 0.5px;
-  color: var(--paper);
+  color: var(--text-h);
   background: var(--chip-color);
   font-weight: 400;
 }
@@ -1738,7 +1710,7 @@ main h1 {
 .unlock.affordable .unlock-btn:hover,
 .upgrade.affordable .upgrade-btn:hover {
   background: var(--text-h);
-  color: var(--paper);
+  color: var(--bg);
 }
 
 /* Ready stamp — wax-seal style, slight tilt. */
