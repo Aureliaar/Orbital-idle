@@ -930,10 +930,9 @@ main h1 {
   align-items: center;
   gap: 4px;
   padding: 22px 20px 18px;
-  border: 0;
-  border-left: 2px solid var(--pad-color);
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
-  background: transparent;
+  background: var(--paper);
   color: var(--text-h);
   font: inherit;
   font-family: var(--sans);
@@ -941,15 +940,15 @@ main h1 {
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  transition: border-color 140ms ease, background 140ms ease, transform 60ms ease;
+  transition: border-color 140ms ease, transform 60ms ease;
 }
 
 .pad:hover {
-  border-left-color: var(--text-h);
+  border-color: var(--text-h);
 }
 
 .pad:active {
-  background: color-mix(in srgb, var(--pad-color) 12%, transparent);
+  border-color: var(--text-h);
   transform: scale(0.97);
 }
 
@@ -1059,7 +1058,7 @@ main h1 {
 .pad.empty {
   --pad-color: var(--accent);
   border: 1.5px dashed var(--accent);
-  background: transparent;
+  background: var(--paper);
   animation: empty-pulse 3.6s ease-in-out infinite;
   cursor: default;
 }
@@ -1128,7 +1127,7 @@ main h1 {
 .slot-picker-toggle {
   position: absolute;
   top: 6px;
-  left: 8px;
+  left: 6px;
   z-index: 1;
   width: clamp(28px, 18%, 48px);
   height: clamp(36px, 50%, 64px);
@@ -1136,9 +1135,9 @@ main h1 {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 0;
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
-  background: transparent;
+  background: var(--paper);
   color: var(--text);
   font: inherit;
   font-size: 1.1rem;
@@ -1149,6 +1148,7 @@ main h1 {
 .slot-picker-toggle:hover,
 .slot-picker-toggle.open {
   color: var(--text-h);
+  border-color: var(--text-h);
 }
 
 .slot-picker-backdrop {
@@ -1501,28 +1501,25 @@ main h1 {
   align-items: stretch;
   gap: 6px;
   padding: 14px 20px 16px;
-  border: 0;
-  border-left: 2px solid color-mix(in srgb, var(--chip-color) 60%, transparent);
+  border: 0.5px solid var(--rule-thin);
   border-radius: 0;
-  background: transparent;
+  background: var(--paper);
   text-align: left;
   transition: border-color 140ms ease;
 }
 
 .unlock:hover,
 .upgrade:hover {
-  border-left-color: var(--chip-color);
+  border-color: var(--text-h);
 }
 
 .unlock.next {
-  border-left-width: 3px;
-  border-left-color: var(--chip-color);
+  border-color: var(--chip-color);
 }
 
 .unlock.unlock-slot,
 .unlock.unlock-stack {
-  border-left-style: dashed;
-  border-left-width: 2px;
+  border-style: dashed;
   grid-column: 1 / -1;
 }
 
@@ -1698,8 +1695,7 @@ main h1 {
 
 .unlock.affordable,
 .upgrade.affordable {
-  border-left-width: 3px;
-  border-left-color: var(--chip-color);
+  border-color: var(--chip-color);
 }
 
 .unlock.affordable .unlock-btn,
