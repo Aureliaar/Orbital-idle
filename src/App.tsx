@@ -1404,14 +1404,6 @@ function App() {
                     {planet?.name ?? activePlanet} <span className="resonator-active-note">· {activePlanet}</span>
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className="resonator-active-switch"
-                  onClick={() => setTab('orbits')}
-                  aria-label="Switch planet — back to orbits"
-                >
-                  switch ↗
-                </button>
               </section>
             )
           })()}

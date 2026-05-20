@@ -908,10 +908,7 @@ main h1 {
   aspect-ratio: 1;
   margin: 0 auto;
   display: block;
-  border: 0.5px solid var(--rule-thin);
-  border-radius: 0;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 4px var(--bg);
+  background: transparent;
 }
 
 .pads {
@@ -1391,24 +1388,6 @@ main h1 {
   font-style: normal;
   font-size: 0.78rem;
   color: var(--text);
-}
-
-.resonator-active-switch {
-  flex: 0 0 auto;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-family: var(--sc);
-  font-size: 0.62rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 4px 2px;
-  cursor: pointer;
-  transition: color 140ms ease;
-}
-
-.resonator-active-switch:hover {
-  color: var(--accent);
 }
 
 /* --- Progression: idle rate + unlock cards + yield upgrades --- */
