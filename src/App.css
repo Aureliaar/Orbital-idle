@@ -27,11 +27,15 @@ main {
   isolation: isolate;
 }
 
-/* Page contents render above the PageChrome's absolute decoration
-   layers. Each direct child sits on z-index 1, the chrome on 0. */
+/* Push PageChrome decoration layers behind content instead of lifting
+   every content section above them. This avoids creating per-section
+   stacking contexts, which would trap position:fixed modals (like the
+   slot picker at z-index 50) below later DOM siblings. */
+main > [aria-hidden='true'] {
+  z-index: -1;
+}
 main > *:not(.orbit-engraving):not([aria-hidden='true']) {
   position: relative;
-  z-index: 1;
 }
 main > .folio-mark,
 main > h1,
@@ -44,7 +48,6 @@ main > .resonator-active,
 main > .resonator-progress,
 main > .upgrade-overlay {
   position: relative;
-  z-index: 1;
 }
 
 .folio-mark {
