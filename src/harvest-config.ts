@@ -41,7 +41,7 @@ export const AUTO_PLUCK_PENALTY = 0.5
 export const PAD_COLORS: Record<string, string> = {
   C: '#dc4836', // red
   D: '#b86b1a', // burnt amber
-  E: '#a58215', // deep gold
+  E: '#6d8f18', // olive-gold
   F: '#4aa84a', // green
   G: '#3a9fb8', // teal
   A: '#3a6dc8', // blue
