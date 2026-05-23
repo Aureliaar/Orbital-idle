@@ -1388,25 +1388,6 @@ function App() {
       </section>
       {tab === 'harvest' && (
         <>
-          {(() => {
-            const planet = BODIES.find((b) => b.id === activePlanet)
-            const color = PAD_COLORS[activePlanet] ?? 'var(--accent)'
-            return (
-              <section
-                className="resonator-active"
-                aria-label="Active resonator"
-                style={{ ['--chip-color' as string]: color }}
-              >
-                <span className="resonator-active-swatch" aria-hidden="true" />
-                <span className="resonator-active-label">
-                  <span className="resonator-active-kicker">Resonator</span>
-                  <span className="resonator-active-name">
-                    {planet?.name ?? activePlanet} <span className="resonator-active-note">· {activePlanet}</span>
-                  </span>
-                </span>
-              </section>
-            )
-          })()}
           <HarvestStage
             key={activePlanet}
             unlockedIds={unlockedIds}
@@ -1446,7 +1427,6 @@ function App() {
               <div className="prog-section prog-unlocks">
                 <h3 className="prog-h">
                   <span className="prog-h-label">Next</span>
-                  <span className="prog-h-sub">unlock new pieces of the resonator</span>
                 </h3>
                 <ul className="unlocks" role="list">
                   {nextUnlocks.map((id, i) => {

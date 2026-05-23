@@ -1227,11 +1227,6 @@ export function HarvestStage({
           </div>
         )
       })()}
-      <p className="harvest-hint">
-        Tap a slot (or press {SLOT_KEYS.slice(0, slotCount).map((k) => k.toUpperCase()).join('/')}) to play; swipe
-        left/right to swap its note. Each note mints its own currency; land coincident partials while the first
-        rings to mint a freq currency. Auto-plucked slots fire themselves at half yield (⚡).
-      </p>
     </section>
   )
 }

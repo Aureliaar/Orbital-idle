@@ -44,7 +44,6 @@ main > .tabs,
 main > .currencies-panel,
 main > .stage,
 main > .harvest,
-main > .resonator-active,
 main > .resonator-progress,
 main > .upgrade-overlay {
   position: relative;
@@ -1046,15 +1045,6 @@ main h1 {
   font-feature-settings: 'tnum';
 }
 
-.harvest-hint {
-  margin: 0;
-  font-family: var(--display);
-  font-style: italic;
-  font-size: 0.82rem;
-  color: var(--text);
-  text-align: center;
-}
-
 /* --- Slot picker --- */
 
 .slot {
@@ -1341,58 +1331,6 @@ main h1 {
   color: var(--accent);
 }
 
-/* --- Active resonator banner: which planet's instance is loaded. --- */
-
-.resonator-active {
-  width: min(720px, 100%);
-  margin: 0 0 6px;
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-left: 2px solid var(--chip-color, var(--accent));
-  background: transparent;
-}
-
-.resonator-active-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--chip-color, var(--accent));
-  flex: 0 0 auto;
-}
-
-.resonator-active-label {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.resonator-active-kicker {
-  font-family: var(--sc);
-  font-size: 0.58rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.resonator-active-name {
-  font-family: var(--display);
-  font-style: italic;
-  font-size: 1rem;
-  color: var(--chip-color, var(--text-h));
-  line-height: 1.2;
-}
-
-.resonator-active-note {
-  font-family: var(--mono);
-  font-style: normal;
-  font-size: 0.78rem;
-  color: var(--text);
-}
 
 /* --- Progression: idle rate + unlock cards + yield upgrades --- */
 
