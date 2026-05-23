@@ -934,7 +934,7 @@ main h1 {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 24px 22px 20px;
+  padding: 20px 22px 16px;
   border: 0.5px solid var(--rule-thin);
   border-radius: 0;
   background: var(--paper);
@@ -953,7 +953,7 @@ main h1 {
 }
 
 .pad:active {
-  border-color: var(--text-h);
+  border-color: var(--pad-color);
   transform: scale(0.97);
 }
 
@@ -964,7 +964,7 @@ main h1 {
 .pad-cooldown {
   position: absolute;
   inset: auto 0 0 0;
-  height: 2px;
+  height: 3px;
   background: var(--pad-color);
   transform-origin: right;
   transform: scaleX(0);
@@ -1023,13 +1023,13 @@ main h1 {
   display: inline-flex;
   align-items: baseline;
   gap: 0;
-  font-size: 1.5rem;
+  font-size: 1.65rem;
 }
 
 .pad-note-sep {
-  margin: 0 4px;
+  margin: 0 5px;
   color: var(--text);
-  opacity: 0.55;
+  opacity: 0.4;
   font-weight: 400;
 }
 
@@ -1040,15 +1040,18 @@ main h1 {
 
 .pad-ratio {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--text-3);
   font-feature-settings: 'tnum';
+  margin-top: 2px;
 }
 
 /* --- Slot picker --- */
 
 .slot {
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .pad.empty {
@@ -1089,19 +1092,18 @@ main h1 {
 }
 
 .slot-picker-toggle.attention {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--rule-thin));
+  border-top: 0.5px solid color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--accent);
   animation: picker-attention 3.2s ease-in-out infinite;
 }
 
 @keyframes picker-attention {
   0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent);
-    transform: scale(1);
+    background: color-mix(in srgb, var(--accent) 6%, var(--paper));
   }
   50% {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-    transform: scale(1.06);
+    background: color-mix(in srgb, var(--accent) 16%, var(--paper));
   }
 }
 
@@ -1121,30 +1123,30 @@ main h1 {
 }
 
 .slot-picker-toggle {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 1;
-  width: clamp(28px, 18%, 48px);
-  height: clamp(36px, 50%, 64px);
+  width: 100%;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0.5px solid var(--rule-thin);
+  border-top: none;
   border-radius: 0;
-  background: var(--paper);
-  color: var(--text);
+  background: color-mix(in srgb, var(--text-h) 4%, var(--paper));
+  color: var(--text-3);
   font: inherit;
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   line-height: 1;
   cursor: pointer;
+  touch-action: manipulation;
+  transition: background 120ms ease, color 120ms ease;
 }
 
 .slot-picker-toggle:hover,
 .slot-picker-toggle.open {
   color: var(--text-h);
   border-color: var(--text-h);
+  background: color-mix(in srgb, var(--text-h) 8%, var(--paper));
 }
 
 .slot-picker-backdrop {
