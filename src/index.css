@@ -26,6 +26,18 @@
   --shadow: none;
   --paper-tex: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0.10  0 0 0 0 0.07  0 0 0 0 0.04  0 0 0 0.32 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 
+  /* Page-chrome geometry — single source of truth shared by PageChrome.tsx
+     (corner ornaments + frame border) and <main>'s padding so inner content
+     never collides with the decorative frame at the corners. */
+  --frame-edge: 6px;                              /* corner offset from <main> edge */
+  --frame-inset: 10px;                            /* double-rule border inset */
+  --frame-corner: clamp(40px, 11vw, 60px);        /* corner ornament size */
+  /* The corner SVG's ink only fills the upper-left ~60% of its box (L-bracket
+     + birds top out around viewBox y=36 of 60), so safe-y budgets against the
+     ink extent rather than the full box. */
+  --frame-safe-y: calc(var(--frame-edge) + var(--frame-corner) * 0.6 + 8px);
+  --frame-safe-x: calc(var(--frame-inset) + 8px);
+
   --sans: 'IM Fell DW Pica', 'Newsreader', Georgia, serif;
   --heading: 'IM Fell DW Pica', 'Newsreader', Georgia, serif;
   --display: 'IM Fell English', 'Newsreader', Georgia, serif;
