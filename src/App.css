@@ -88,6 +88,21 @@ main h1 {
   line-height: 1.35;
 }
 
+.dev-grant {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 0.5px solid var(--text-3);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
 /* --- Orbit plate: static engraving behind, animated canvas on top --- */
 
 .orbit-plate {

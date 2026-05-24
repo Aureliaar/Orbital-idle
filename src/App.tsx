@@ -1083,29 +1083,21 @@ function App() {
     [noteYieldLvls],
   )
 
-  // Dev cheat: press 'y' to unlock all notes + grant currencies for yield testing.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'y' || e.ctrlKey || e.metaKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
-      updateActive((s) => {
-        const allIds = BODIES.map((b) => b.id)
-        const grant: CurrencyPurse = {}
-        for (const id of allIds) grant[id] = 500
-        for (const k of FREQ_CURRENCY_KEYS) grant[k] = 100
-        const seen = new Set(s.seenCurrencies)
-        for (const k of Object.keys(grant) as CurrencyKey[]) seen.add(k)
-        return {
-          ...s,
-          currencies: addToPurse(s.currencies, grant),
-          unlockedIds: allIds,
-          seenCurrencies: seen,
-        }
-      })
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+  const devGrant = useCallback(() => {
+    updateActive((s) => {
+      const allIds = BODIES.map((b) => b.id)
+      const grant: CurrencyPurse = {}
+      for (const id of allIds) grant[id] = 500
+      for (const k of FREQ_CURRENCY_KEYS) grant[k] = 100
+      const seen = new Set(s.seenCurrencies)
+      for (const k of Object.keys(grant) as CurrencyKey[]) seen.add(k)
+      return {
+        ...s,
+        currencies: addToPurse(s.currencies, grant),
+        unlockedIds: allIds,
+        seenCurrencies: seen,
+      }
+    })
   }, [updateActive])
 
   // Progressive disclosure: only show 1 card per category at any time so the
@@ -1250,6 +1242,8 @@ function App() {
         {tab === 'orbits'
           ? 'Diatonic wheel · tap a body to enter its resonator · hold for details'
           : `Resonator · ${BODIES.find((b) => b.id === activePlanet)?.name ?? activePlanet} (${activePlanet}) · isolated purse, ladder, and slots`}
+        {' '}
+        <button type="button" className="dev-grant" onClick={devGrant} aria-label="Dev: grant currencies">+$</button>
       </p>
       <nav className="tabs" role="tablist" aria-label="Stage">
         <button
