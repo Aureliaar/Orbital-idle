@@ -1,117 +1,170 @@
-# Orbital Idle — Design Plan
+# Orbital — Design
 
-An idle game where orbital mechanics and music theory are the same simulation.
-Launch windows are beat frequencies. Consonant intervals are cheap transfers.
-The solar system is a slowly evolving drone, and you play by listening.
+An idle game where music theory is played, not taught. You pluck notes,
+watch their harmonic series unfold on a pitch helix, and harvest the
+moments where partials from different notes land on the same frequency.
+Those coincidences — the physical basis of consonance — are your currency.
 
 ## Core premise
 
-Mean-motion resonance and musical consonance are the same math: small
-integer ratios of frequencies. A synodic period — the time between successive
-launch windows from body A to body B — is literally a beat frequency. We lean
-all the way into this. The music theory isn't flavor on top of orbital
-mechanics; it *is* the orbital mechanics, exposed in a form humans have
-intuitions about.
+Consonance isn't flavor. It's the mechanic. Two notes whose harmonic
+series share a partial at the same frequency are "in resonance." That
+shared partial is a coin you can pick up. A perfect fifth (3:2) shares
+partials early and often — cheap, abundant currency. A major seventh
+(15:8) shares them only at high harmonics — rare, gated currency. The
+entire unlock tree, economy, and progression fall out of this one idea:
+**intervals that sound good together literally produce more.**
 
-## The isomorphism
+## The two stages
 
-| Music                    | Orbital mechanics                            |
-| ------------------------ | -------------------------------------------- |
-| Pitch (frequency)        | Orbital angular frequency (1 / period)       |
-| Octave (2:1)             | Period doubling — outer body at half the rate|
-| Perfect fifth (3:2)      | 3:2 mean-motion resonance (real: Neptune:Pluto) |
-| Beat frequency           | Synodic period — the launch-window cadence   |
-| Consonant interval       | Cheap, frequent transfer windows             |
-| Dissonant interval       | Expensive, rare windows                      |
-| Modulation               | Plane change / inclination burn              |
-| Cadence (V→I)            | Return-to-Earth trajectory                   |
-| Pivot chord              | Gravity assist via a shared resonance        |
+### Orbits (Cap. I)
 
-## System map: circolo delle quinte
+Seven bodies orbit a stylized sun at just-intonation period ratios
+(C = 1:1, D = 9:8, E = 5:4, F = 4:3, G = 3:2, A = 5:3, B = 15:8).
+The canvas animates their motion in real time; each body strikes a note
+when it completes an orbit, with velocity proportional to its proximity
+to Earth (alignment = louder). Three timbres (pluck, piano, synth) color
+the drone. The orbital view is ambient and navigational — tap a planet to
+enter its resonator.
 
-Bodies are arranged on a wheel where each step is a perfect fifth. Adjacent
-bodies are in 3:2 resonance — cheap, frequent windows. Opposite bodies (the
-tritone, *diabolus in musica*) are maximally hard: rare windows, big delta-v,
-long transit. The wheel doubles as the tech-tree map. You start at the tonic
-(Earth) and unlock outward.
+### Resonator (Cap. II)
 
-For v1 we drop to a **diatonic 7-body wheel** instead of the full 12-body
-chromatic. Chromatic bodies (asteroids, comets, captured objects) become
-side-content unlocked later.
+The core idle loop. Each planet has its own isolated resonator with:
 
-## Mechanics that fall out of the model
+- **Slots** (1–3). Assign a note to a slot. Tap the slot (or press
+  A / S / D) to pluck it — its first 6 partials appear on the pitch
+  helix and decay over 1.5 s.
+- **Coincidence harvesting.** When a new pluck's partials overlap an
+  existing partial from a different note (within 0.5% tolerance), the
+  coincidence mints one unit of the FreqCurrency for that frequency.
+  Visual burst + particle shower to the matching currency chip.
+- **Note currency.** Each pluck also mints its own note's currency
+  (C, D, E, F, G, A, B), scaled by a per-note yield multiplier.
+- **Chord stacking.** Slot 1's capacity upgrades from 1 → 2 → 3.
+  A stacked slot fires all its notes in sequence on a single tap — the
+  later notes scan against the earlier ones' still-ringing cloud, so a
+  chord pays its coincidence bonus every tap at full amplitude.
+- **Auto-pluck.** Once 3 notes are unlocked, buy auto-pluck per slot.
+  Fires at half yield on the ring-duration cadence, staggered so clouds
+  overlap at peak coincidence.
 
-- **Chord harvesting.** Park probes at three bodies whose periods form a major
-  triad (4:5:6). While the alignment holds, you get a multiplier. Minor triad
-  (10:12:15) gives a smaller, moodier bonus. Diminished is unstable and decays.
-- **Just vs equal temperament.** Just intonation = pure ratios = maximum
-  efficiency, but only in one reference key. Equal temperament = slightly
-  detuned everywhere but flexible. Late-game upgrade: switch tunings per
-  mission profile.
-- **Modulation = plane change.** Reaching a body in a different key signature
-  costs delta-v. Pivot chords (shared notes between keys) discount the
-  transition — these map onto gravity assists.
-- **Tempo as time-scale.** A BPM knob controls how fast the clock runs.
-  Prestige unlocks higher tempos.
-- **Cadence bonuses.** Missions that resolve V→I (return via a dominant body's
-  gravity assist) pay more than ones that limp home directly.
-- **Dissonance debt.** Too many dissonant trajectories in a row and the system
-  "wants resolution." The next consonant return pays a catharsis bonus.
+## Currencies
 
-## The audio layer
+Two layers, both derived from the harmonic series:
 
-Each active orbit contributes a sustained tone at its frequency, transposed
-into audible range on a log scale. The solar system becomes a drone that
-slowly evolves as bodies move in and out of phase. Launch windows are
-*audibly* the moments of consonance. A player not even looking at the screen
-hears a fifth resolve and knows it's time to launch. This is the feature that
-makes the game feel like nothing else.
+| Type | Example | Minted by |
+|------|---------|-----------|
+| Note | C, D, E, … | Tapping a slot with that note loaded |
+| Freq | F3, F4, F5, F15/4, … | Two notes' partials coinciding at that frequency ratio × tonic |
 
-## Tension to resolve in v1
+Nine freq currencies exist in the diatonic at H≤6, each a specific
+rational multiple of the tonic (3×, 4×, 5×, 15/4×, 9/2×, 45/8×, 6×,
+20/3×, 15/2×). Their sources are the note pairs whose series reach that
+frequency — e.g. F5 (5×tonic) is minted by C×E, C×A, and E×A.
 
-Real planetary periods don't land on clean ratios. Two options:
+## Progression
 
-1. **Stylized:** snap each body to the nearest just interval. Accept the lie.
-2. **Real:** keep true periods and let the game *teach* that the solar system
-   is "out of tune." Tuning research becomes a mechanic — players invest in
-   precision instruments to characterize the detuning and exploit it.
+All costs are expressed in **scale-degree patterns** relative to the
+planet's tonic, then resolved into its local note and freq currencies.
+This means every planet runs the same progression shape in a different
+mode (C Ionian, D Dorian, E Phrygian, …), and some modes have fewer
+freq gates because their interval pairs lack coincidences at H≤6.
 
-Lean toward (1) for v1 to keep the core loop legible, leave (2) as a prestige
-direction.
+### Unlock ladder
 
-## v1 scope
+Notes unlock in a fixed scale-degree order:
+I → III → V → IV → VI → II → VII
 
-Smallest thing that proves the loop:
+Tonic triad first (cheap, teaches the core loop), then subdominant/
+submediant (introduces new freq currencies), then the dissonant pair.
+Each step costs a mix of previously-minted note and freq currencies.
 
-- 7 bodies on a diatonic wheel (Earth as tonic).
-- Real-time audio synth playing each body as a sine wave at its (transposed)
-  orbital frequency.
-- One launch pad. Launch button is cheap when the current Earth-target
-  interval is consonant, expensive when dissonant.
-- Idle income from a comsat constellation in LEO (steady, capped).
-- One interplanetary mission type (probe → body → return) that pays a lump
-  sum on cadence return.
-- A visible porkchop-style readout showing upcoming windows as a piano roll.
+### Slot & capacity unlocks
 
-Out of scope for v1: gravity assists, multi-hop trajectories, tuning research,
-prestige, chromatic bodies, chord harvesting (tease in UI, defer mechanic).
+- Slot 2 unlocks after the mediant (III) is in hand.
+- Slot 3 demands freq currency from cross-slot play.
+- Slot 1 capacity upgrades (chord stacking) cost chord-shaped freq mixes.
 
-## Open questions
+### Auto-pluck
 
-- Time compression ratio. 1 in-game day = how many real seconds? Needs to
-  make Earth-Mars windows feel ~weekly in real time without trivializing them.
-- How loud is the drone by default? Does it need a mute / visualizer-only
-  mode for accessibility?
-- Do we want a tutorial that teaches the music-theory mapping, or do we trust
-  players to discover it via the audio?
-- Stack: plain HTML/Canvas + WebAudio is probably enough. Revisit if the
-  simulation outgrows it.
+Gated behind 3 unlocked notes. Cost scales ×1.6 per slot. Fires at half
+yield — manual play is always strictly better.
 
-## Next steps
+### Per-note yield
 
-1. Pick the time-compression ratio and lock the 7 body periods (snapped to
-   just intervals).
-2. Prototype the WebAudio drone with 7 oscillators driven by a shared clock.
-3. Add the launch button with a cost function tied to current interval
-   dissonance.
-4. Wire idle income and a single interplanetary mission to close the loop.
+Once the full diatonic is unlocked, each note's yield can be leveled up.
+Cost is paid in the **circle-of-fifths neighbor's** currency (upgrading C
+costs G, upgrading G costs D, etc.), linking notes in a closed cycle that
+forces the player to keep all notes flowing.
+
+## Seven independent resonators
+
+Each planet's resonator is fully isolated — its own purse, unlock ladder,
+slots, auto-pluck state, and yield levels. Switching planets swaps the
+entire slice. No currency crosses boundaries. The player must develop
+each resonator from scratch, but the mode-shifted costs mean the puzzle
+differs per planet.
+
+## Audio
+
+Two independent audio layers on a shared AudioContext:
+
+1. **Orbital drone** (Tone.js): Per-body struck notes at just-intonation
+   pitches relative to C3 (130.81 Hz), velocity modulated by Earth
+   proximity, panned across the stereo field.
+2. **Resonator plucks** (raw WebAudio): Additive synthesis — 6 sine
+   oscillators at the harmonic series of the plucked note, amplitude
+   weighted 1/n, envelope matched to the visual ring duration.
+   Coincident partials get a 2.2× loudness boost so the consonance is
+   audible.
+
+iOS workaround: routes master through a MediaStreamDestination + hidden
+`<audio playsinline>` to bypass the silent-switch "ambient" category.
+
+## Visual language
+
+Observatory manuscript aesthetic:
+
+- Paper texture, foxing spots, radial vignette, double-rule frame,
+  baroque corner ornaments.
+- Engraved plate behind the orbit canvas (hatching, compass roses,
+  sun-ray center, chromatic tick ring, cartouche label).
+- Pitch helix: log-spiral in an SVG disc. Radius = octave (pitch height),
+  angle = chroma (pitch class). Coincident partials literally overlap
+  as the same dot — consonance is visible collision.
+- Color: Newton/Boomwhacker diatonic palette (C red, D amber, E olive,
+  F green, G teal, A blue, B violet). Freq currencies use a cool→warm
+  gradient by ascending frequency.
+
+## What's not built yet (future directions)
+
+These are ideas from the original design or natural extensions — none
+are committed, and none should be built unless they connect to the
+harmonic-coincidence core:
+
+- **Cross-resonator interaction.** Some resource or bonus from having
+  multiple planets developed simultaneously.
+- **Chromatic bodies.** Sharps/flats as side-content — asteroids or
+  captured objects on the orbital wheel, unlocked once the diatonic is
+  complete.
+- **Tuning research.** Just intonation is the default; equal temperament
+  as a late-game alternative that's slightly worse everywhere but
+  flexible across keys.
+- **Launch missions.** The orbital stage's alignment events could gate a
+  mission mechanic — launch when consonant, expensive when dissonant.
+  Deferred until the resonator loop is fully proven.
+- **Gravity assists / pivot chords.** Multi-hop trajectories routed
+  through a shared-resonance body (the "pivot chord" of modulation
+  theory).
+- **Prestige / tempo.** Reset at a higher BPM — bodies orbit faster,
+  windows come quicker, currencies flow faster.
+- **Persistent save.** LocalStorage or IndexedDB serialization of all
+  resonator state.
+
+## Stack
+
+Vite + React 19 + TypeScript. Tone.js for the orbital drone, raw
+WebAudio for the resonator plucks. Canvas for the orbit animation, SVG
+for the pitch helix. No router or state library — state lives in App.tsx
+as hooks, sliced per-planet via a Record<BodyId, ResonatorState>. Deployed
+to both GitHub Pages and Cloudflare Workers.
