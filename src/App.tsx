@@ -529,6 +529,140 @@ function ReadyBadge() {
   )
 }
 
+// Circle-of-fifths order for the yield wheel layout.
+const FIFTHS_ORDER: readonly BodyId[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F']
+
+type YieldOption = {
+  id: BodyId
+  lvl: number
+  cost: CurrencyPurse
+  costNote: BodyId
+  gateUnlocked: boolean
+  progress: number
+  affordable: boolean
+}
+
+function YieldWheel({
+  options,
+  onBuy,
+}: {
+  options: readonly YieldOption[]
+  onBuy: (id: BodyId) => void
+}) {
+  const byId = useMemo(() => {
+    const m = new Map<BodyId, YieldOption>()
+    for (const o of options) m.set(o.id, o)
+    return m
+  }, [options])
+
+  const WR = 140
+  const WCX = 170
+  const WCY = 160
+  const VW = 340
+  const VH = 340
+
+  return (
+    <div className="yield-wheel-wrap">
+      <svg
+        className="yield-wheel-svg"
+        viewBox={`0 0 ${VW} ${VH}`}
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      >
+        {/* Flow arrows: each note's cost arrow points from the note to its
+            dominant (the note whose currency pays for the upgrade). */}
+        {FIFTHS_ORDER.map((id, i) => {
+          const nextId = FIFTHS_ORDER[(i + 1) % 7]
+          const a0 = (i / 7) * 2 * Math.PI - Math.PI / 2
+          const a1 = ((i + 1) / 7) * 2 * Math.PI - Math.PI / 2
+          const gap = 28
+          const x0 = WCX + (WR - gap) * Math.cos(a0)
+          const y0 = WCY + (WR - gap) * Math.sin(a0)
+          const x1 = WCX + (WR - gap) * Math.cos(a1)
+          const y1 = WCY + (WR - gap) * Math.sin(a1)
+          const opt = byId.get(id)
+          const opacity = opt?.affordable ? 0.6 : 0.18
+          const midA = ((i + 0.5) / 7) * 2 * Math.PI - Math.PI / 2
+          const bulge = 18
+          const cx = WCX + (WR - gap + bulge) * Math.cos(midA)
+          const cy = WCY + (WR - gap + bulge) * Math.sin(midA)
+          return (
+            <g key={`arrow-${id}`}>
+              <path
+                d={`M${x0.toFixed(1)} ${y0.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`}
+                fill="none"
+                stroke={PAD_COLORS[nextId]}
+                strokeOpacity={opacity}
+                strokeWidth="1"
+                strokeDasharray={opt?.affordable ? 'none' : '3 4'}
+              />
+              <polygon
+                points={(() => {
+                  const sz = 4.5
+                  const da = Math.atan2(y1 - cy, x1 - cx)
+                  const tx = x1 - Math.cos(da) * 1
+                  const ty = y1 - Math.sin(da) * 1
+                  const p1x = tx - sz * Math.cos(da) + (sz * 0.5) * Math.sin(da)
+                  const p1y = ty - sz * Math.sin(da) - (sz * 0.5) * Math.cos(da)
+                  const p2x = tx - sz * Math.cos(da) - (sz * 0.5) * Math.sin(da)
+                  const p2y = ty - sz * Math.sin(da) + (sz * 0.5) * Math.cos(da)
+                  return `${tx.toFixed(1)},${ty.toFixed(1)} ${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}`
+                })()}
+                fill={PAD_COLORS[nextId]}
+                fillOpacity={opacity}
+              />
+            </g>
+          )
+        })}
+      </svg>
+      <div className="yield-wheel-nodes">
+        {FIFTHS_ORDER.map((id, i) => {
+          const opt = byId.get(id)
+          if (!opt) return null
+          const angle = (i / 7) * 360 - 90
+          const rad = (angle * Math.PI) / 180
+          const pctX = 50 + 41 * Math.cos(rad)
+          const pctY = 50 + 41 * Math.sin(rad)
+          const color = PAD_COLORS[id] ?? 'var(--text)'
+          const mul = noteYieldMultiplier(opt.lvl)
+          return (
+            <button
+              key={id}
+              type="button"
+              className={`yield-node${opt.affordable ? ' affordable' : ''}${opt.lvl > 0 ? ' leveled' : ''}`}
+              style={{
+                ['--node-color' as string]: color,
+                left: `${pctX.toFixed(1)}%`,
+                top: `${pctY.toFixed(1)}%`,
+                ['--p' as string]: opt.progress.toFixed(3),
+              }}
+              disabled={!opt.affordable}
+              onClick={() => onBuy(id)}
+              title={
+                opt.affordable
+                  ? `Upgrade ${id} yield to lvl ${opt.lvl + 1}`
+                  : `${id} yield lvl ${opt.lvl} — costs ${formatCost(opt.cost)}`
+              }
+              aria-label={`${id} yield lvl ${opt.lvl}, ×${mul.toFixed(2)}${opt.affordable ? ' — ready to buy' : ''}`}
+            >
+              <span className="yield-node-note">{id}</span>
+              <span className="yield-node-mul">×{mul.toFixed(1)}</span>
+              {opt.lvl > 0 && (
+                <span className="yield-node-lvl">{opt.lvl}</span>
+              )}
+              <span className="yield-node-bar" aria-hidden="true" />
+            </button>
+          )
+        })}
+      </div>
+      <div className="yield-wheel-center" aria-hidden="true">
+        <span className="yield-center-label">costs</span>
+        <span className="yield-center-arrow">↻</span>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const progressRef = useRef<HTMLElement | null>(null)
@@ -1080,20 +1214,6 @@ function App() {
         .slice(0, 1)
     : []
 
-  // Yield candidate: among every unlocked note's next-level upgrade, surface
-  // only the most promising — affordable first, then closest to affordable,
-  // then cheapest by level. Gated until the diatonic circle is complete so
-  // the early game stays focused on unlocks/slots/auto-plucks — once you've
-  // closed C→G→D→A→E→B→F→C, yield becomes the "now deepen each note" layer.
-  type YieldOption = {
-    id: BodyId
-    lvl: number
-    cost: CurrencyPurse
-    costNote: BodyId
-    gateUnlocked: boolean
-    progress: number
-    affordable: boolean
-  }
   const yieldPanelUnlocked = unlockLadder.every((id) => unlockedIds.includes(id))
   const yieldOptions: YieldOption[] = yieldPanelUnlocked
     ? unlockedIds.map((id) => {
@@ -1106,13 +1226,7 @@ function App() {
         return { id, lvl, cost, costNote, gateUnlocked, progress, affordable }
       })
     : []
-  const visibleYieldOption: YieldOption | undefined = [...yieldOptions]
-    .sort((a, b) => {
-      if (a.affordable !== b.affordable) return a.affordable ? -1 : 1
-      if (a.gateUnlocked !== b.gateUnlocked) return a.gateUnlocked ? -1 : 1
-      if (a.progress !== b.progress) return b.progress - a.progress
-      return a.lvl - b.lvl
-    })[0]
+  const affordableYieldOptions = yieldOptions.filter((o) => o.affordable)
 
   // Aggregate every visible buy that's currently affordable, in display
   // order. Feeds both the scroll cue under the currencies panel and the
@@ -1154,11 +1268,11 @@ function App() {
       })
     }
   }
-  if (visibleYieldOption?.affordable) {
+  for (const opt of affordableYieldOptions) {
     readyBuys.push({
-      label: `${visibleYieldOption.id} yield`,
-      costKeys: (Object.keys(visibleYieldOption.cost) as CurrencyKey[]).filter(
-        (k) => (visibleYieldOption.cost[k] ?? 0) > 0,
+      label: `${opt.id} yield`,
+      costKeys: (Object.keys(opt.cost) as CurrencyKey[]).filter(
+        (k) => (opt.cost[k] ?? 0) > 0,
       ),
     })
   }
@@ -1575,69 +1689,18 @@ function App() {
                 </ul>
               </div>
             )}
-            {visibleYieldOption && (
+            {yieldOptions.length > 0 && (
               <div className="prog-section prog-upgrades">
                 <h3 className="prog-h">
                   <span className="prog-h-label">Yield</span>
                   <span className="prog-h-sub">
-                    each note's currency scales ×{YIELD_STEP.toFixed(2)} per level, paid in its dominant
+                    ×{YIELD_STEP.toFixed(1)} per level · costs flow around the circle of fifths
                   </span>
                 </h3>
-                <ul className="upgrades" role="list" aria-label="Per-note yield upgrades">
-                  {(() => {
-                    const opt = visibleYieldOption
-                    const mul = noteYieldMultiplier(opt.lvl)
-                    const nextMul = mul * YIELD_STEP
-                    const color = PAD_COLORS[opt.id] ?? 'var(--text)'
-                    return (
-                      <li
-                        key={opt.id}
-                        className={`upgrade upgrade-note${opt.gateUnlocked ? '' : ' locked'}${opt.affordable ? ' affordable' : ''}`}
-                        style={{ ['--chip-color' as string]: color }}
-                      >
-                        <header className="upgrade-head-row">
-                          <span
-                            className="upgrade-swatch"
-                            aria-hidden="true"
-                            style={{ background: color }}
-                          />
-                          <span className="upgrade-name">{opt.id}</span>
-                          <span className="upgrade-lvl">lvl {opt.lvl}</span>
-                          {opt.affordable && <ReadyBadge />}
-                        </header>
-                        <div className="upgrade-mul-row" aria-hidden="true">
-                          <span key={opt.lvl} className="upgrade-mul">×{mul.toFixed(2)}</span>
-                          <span className="upgrade-arrow">→</span>
-                          <span className="upgrade-mul upgrade-mul-next">×{nextMul.toFixed(2)}</span>
-                        </div>
-                        {opt.gateUnlocked ? (
-                          <CostChips cost={opt.cost} purse={currencies} />
-                        ) : (
-                          <span className="upgrade-locked-msg">
-                            unlock <strong>{opt.costNote}</strong> first to upgrade
-                          </span>
-                        )}
-                        {opt.gateUnlocked && !opt.affordable && (
-                          <ShortHint cost={opt.cost} purse={currencies} />
-                        )}
-                        <span
-                          className="upgrade-progress"
-                          style={{ ['--p' as string]: opt.progress.toFixed(3) }}
-                          aria-hidden="true"
-                        />
-                        <button
-                          type="button"
-                          className="upgrade-btn"
-                          disabled={!opt.affordable}
-                          onClick={() => buyNoteYield(opt.id)}
-                          aria-label={`Upgrade ${opt.id} yield to lvl ${opt.lvl + 1} (×${nextMul.toFixed(2)})`}
-                        >
-                          Upgrade {opt.id} · ×{nextMul.toFixed(2)}
-                        </button>
-                      </li>
-                    )
-                  })()}
-                </ul>
+                <YieldWheel
+                  options={yieldOptions}
+                  onBuy={buyNoteYield}
+                />
               </div>
             )}
           </section>
