@@ -1083,6 +1083,31 @@ function App() {
     [noteYieldLvls],
   )
 
+  // Dev cheat: press 'y' to unlock all notes + grant currencies for yield testing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'y' || e.ctrlKey || e.metaKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      updateActive((s) => {
+        const allIds = BODIES.map((b) => b.id)
+        const grant: CurrencyPurse = {}
+        for (const id of allIds) grant[id] = 500
+        for (const k of FREQ_CURRENCY_KEYS) grant[k] = 100
+        const seen = new Set(s.seenCurrencies)
+        for (const k of Object.keys(grant) as CurrencyKey[]) seen.add(k)
+        return {
+          ...s,
+          currencies: addToPurse(s.currencies, grant),
+          unlockedIds: allIds,
+          seenCurrencies: seen,
+        }
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [updateActive])
+
   // Progressive disclosure: only show 1 card per category at any time so the
   // panel stays a punch-list of the next concrete action, not a wall of
   // hypotheticals. Once the player buys it, the next candidate slides in.

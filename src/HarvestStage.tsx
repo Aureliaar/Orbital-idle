@@ -180,9 +180,44 @@ type Props = {
 // Yield ring geometry. Sits just outside the outermost octave guide ring.
 const R_YIELD = 194
 const YIELD_RING_W = 12
-const YIELD_CIRCUMFERENCE = 2 * Math.PI * R_YIELD
-const WEDGE_ARC = YIELD_CIRCUMFERENCE / 7
-const WEDGE_GAP = 3
+
+// Sorted chroma angles for wedge boundary computation. Each body gets
+// the angular span from the midpoint-to-previous to midpoint-to-next.
+const SORTED_CHROMA: { id: BodyId; ang: number }[] = BODIES
+  .map((b) => ({ id: b.id, ang: chromaAngleOf(TONIC_HZ * b.ratio) }))
+  .sort((a, b) => a.ang - b.ang)
+
+function wedgeBounds(id: BodyId): [number, number] {
+  const idx = SORTED_CHROMA.findIndex((s) => s.id === id)
+  const prev = SORTED_CHROMA[(idx - 1 + 7) % 7].ang
+  const cur = SORTED_CHROMA[idx].ang
+  const next = SORTED_CHROMA[(idx + 1) % 7].ang
+  let dPrev = cur - prev
+  if (dPrev < 0) dPrev += 2 * Math.PI
+  let dNext = next - cur
+  if (dNext < 0) dNext += 2 * Math.PI
+  const GAP_RAD = 0.03
+  return [cur - dPrev / 2 + GAP_RAD, cur + dNext / 2 - GAP_RAD]
+}
+
+function arcWedgePath(
+  cx: number, cy: number,
+  rInner: number, rOuter: number,
+  startAngle: number, endAngle: number,
+): string {
+  let sweep = endAngle - startAngle
+  if (sweep < 0) sweep += 2 * Math.PI
+  const large = sweep > Math.PI ? 1 : 0
+  const osx = cx + rOuter * Math.cos(startAngle)
+  const osy = cy + rOuter * Math.sin(startAngle)
+  const oex = cx + rOuter * Math.cos(endAngle)
+  const oey = cy + rOuter * Math.sin(endAngle)
+  const iex = cx + rInner * Math.cos(endAngle)
+  const iey = cy + rInner * Math.sin(endAngle)
+  const isx = cx + rInner * Math.cos(startAngle)
+  const isy = cy + rInner * Math.sin(startAngle)
+  return `M${osx.toFixed(1)} ${osy.toFixed(1)} A${rOuter} ${rOuter} 0 ${large} 1 ${oex.toFixed(1)} ${oey.toFixed(1)} L${iex.toFixed(1)} ${iey.toFixed(1)} A${rInner} ${rInner} 0 ${large} 0 ${isx.toFixed(1)} ${isy.toFixed(1)} Z`
+}
 
 // Chroma angle for each note's fundamental — same formula used by the compass.
 function bodyChromaAngle(body: Body): number {
@@ -1050,34 +1085,30 @@ export function HarvestStage({
           style={{ stroke: 'var(--border)', strokeOpacity: 0.7 }}
         />
 
-        {/* Yield ring: thin outer ring divided into 7 arc wedges. Each
-            wedge's opacity encodes yield level. Only rendered once yield
-            is unlocked (all 7 notes discovered). */}
-        {yieldUnlocked && BODIES.map((body, i) => {
+        {/* Yield ring: arc wedges at each note's chroma angle. Fill
+            opacity encodes yield level. Appears once all 7 unlock. */}
+        {yieldUnlocked && BODIES.map((body) => {
           const ang = bodyChromaAngle(body)
           const lvl = noteYieldLvls[body.id] ?? 0
-          const opacity = lvl === 0 ? 0.04 : Math.min(0.45, 0.04 + lvl * 0.09)
+          const opacity = lvl === 0 ? 0.1 : Math.min(0.5, 0.1 + lvl * 0.1)
           const color = PAD_COLORS[body.id] ?? '#aa3bff'
           const costNoteColor = PAD_COLORS[yieldCostNote(body.id)] ?? '#aa3bff'
-          const arcLen = WEDGE_ARC - WEDGE_GAP
-          const offset = -(i * WEDGE_ARC + YIELD_CIRCUMFERENCE / 4 - WEDGE_ARC / 2)
-          const pipAng = ang
-          const pipX = CX + (R_YIELD - YIELD_RING_W / 2 - 1) * Math.cos(pipAng)
-          const pipY = CY + (R_YIELD - YIELD_RING_W / 2 - 1) * Math.sin(pipAng)
+          const [a0, a1] = wedgeBounds(body.id)
+          const rInner = R_YIELD - YIELD_RING_W / 2
+          const rOuter = R_YIELD + YIELD_RING_W / 2
+          const pipX = CX + rInner * Math.cos(ang)
+          const pipY = CY + rInner * Math.sin(ang)
           return (
             <g key={`yield-${body.id}`}>
-              <circle
-                cx={CX}
-                cy={CY}
-                r={R_YIELD}
-                fill="none"
+              <path
+                d={arcWedgePath(CX, CY, rInner, rOuter, a0, a1)}
+                fill={color}
+                fillOpacity={opacity}
                 stroke={color}
-                strokeWidth={YIELD_RING_W}
-                strokeOpacity={opacity}
-                strokeDasharray={`${arcLen.toFixed(1)} ${(YIELD_CIRCUMFERENCE - arcLen).toFixed(1)}`}
-                strokeDashoffset={offset.toFixed(1)}
+                strokeWidth={0.5}
+                strokeOpacity={opacity * 0.6}
               />
-              <circle cx={pipX} cy={pipY} r={2} fill={costNoteColor} fillOpacity={lvl > 0 ? 0.4 : 0.15} />
+              <circle cx={pipX} cy={pipY} r={2.5} fill={costNoteColor} fillOpacity={lvl > 0 ? 0.5 : 0.25} />
             </g>
           )
         })}
