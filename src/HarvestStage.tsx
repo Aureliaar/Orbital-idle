@@ -1114,7 +1114,7 @@ export function HarvestStage({
         })}
 
         {/* Chroma compass: diatonic notes on the base ring. When yield
-            is unlocked, dots become tappable upgrade buttons. */}
+            is unlocked, dots grow into tappable buttons with visible rings. */}
         {BODIES.map((body) => {
           const ang = chromaAngleOf(TONIC_HZ * body.ratio)
           const x = CX + R_BASE * Math.cos(ang)
@@ -1128,31 +1128,53 @@ export function HarvestStage({
           const isFlashing = yieldFlash === body.id
           const isDomFlash = dominantFlash === body.id
           const tappable = yieldUnlocked
+          const dotR = isFlashing ? 10 : tappable ? 8 : isOn ? 5.5 : 3.5
           return (
             <g
               key={body.id}
               onPointerDown={tappable ? (e) => handleCompassTap(body.id, e) : undefined}
               style={tappable ? { cursor: 'pointer' } : undefined}
             >
-              <circle
-                cx={x}
-                cy={y}
-                r={isFlashing ? 9 : isOn ? 5.5 : 3.5}
-                fill={color}
-                fillOpacity={isFlashing ? 0.7 : isOn ? 0.5 : 0.22}
-                className={isAffordable ? 'yield-pulse' : isDomFlash ? 'yield-dom-flash' : undefined}
-              />
-              {isAffordable && (
+              {/* Invisible hit target for mobile taps */}
+              {tappable && (
+                <circle cx={x} cy={y} r={18} fill="transparent" />
+              )}
+              {/* Button ring — always visible when yield is unlocked */}
+              {tappable && (
                 <circle
                   cx={x}
                   cy={y}
-                  r={8}
+                  r={dotR + 3}
                   fill="none"
                   stroke={color}
-                  strokeWidth={1}
-                  strokeOpacity={0.4}
-                  className="yield-pulse-ring"
+                  strokeWidth={isAffordable ? 1.5 : 0.8}
+                  strokeOpacity={isAffordable ? 0.6 : 0.25}
+                  className={isAffordable ? 'yield-pulse-ring' : undefined}
                 />
+              )}
+              <circle
+                cx={x}
+                cy={y}
+                r={dotR}
+                fill={color}
+                fillOpacity={isFlashing ? 0.8 : tappable ? 0.35 : isOn ? 0.5 : 0.22}
+                className={isAffordable ? 'yield-pulse' : isDomFlash ? 'yield-dom-flash' : undefined}
+              />
+              {/* Multiplier label inside the dot when yield is active */}
+              {tappable && (
+                <text
+                  x={x}
+                  y={y + 0.5}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontFamily="ui-monospace, Menlo, Consolas, monospace"
+                  fontSize="7"
+                  fill={color}
+                  fillOpacity={0.9}
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {lvl > 0 ? `×${(1.5 ** lvl).toFixed(1)}` : '×1'}
+                </text>
               )}
               <text
                 x={lx}
@@ -1161,9 +1183,9 @@ export function HarvestStage({
                 dominantBaseline="middle"
                 fontFamily="ui-monospace, Menlo, Consolas, monospace"
                 fontSize="13"
-                fontWeight={isOn ? 600 : 400}
-                fill={isOn ? color : '#1a120a'}
-                fillOpacity={isOn ? 1 : 0.75}
+                fontWeight={isOn || tappable ? 600 : 400}
+                fill={isOn || tappable ? color : '#1a120a'}
+                fillOpacity={isOn || tappable ? 1 : 0.75}
               >
                 {body.id}{yieldUnlocked && lvl > 0 ? String.fromCharCode(0x2080 + lvl) : ''}
               </text>

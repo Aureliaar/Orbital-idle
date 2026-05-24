@@ -1751,22 +1751,22 @@ main h1 {
 /* --- Yield: pulse on affordable compass dots, flash on buy --- */
 
 .yield-pulse {
-  animation: yield-dot-pulse 2s ease-in-out infinite;
+  animation: yield-dot-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes yield-dot-pulse {
-  0%, 100% { fill-opacity: 0.5; }
-  50% { fill-opacity: 0.85; }
+  0%, 100% { fill-opacity: 0.3; }
+  50% { fill-opacity: 0.7; }
 }
 
 .yield-pulse-ring {
   pointer-events: none;
-  animation: yield-ring-pulse 2s ease-in-out infinite;
+  animation: yield-ring-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes yield-ring-pulse {
-  0%, 100% { stroke-opacity: 0.12; stroke-width: 0.8; }
-  50% { stroke-opacity: 0.55; stroke-width: 2.5; }
+  0%, 100% { stroke-opacity: 0.2; stroke-width: 1; }
+  50% { stroke-opacity: 0.8; stroke-width: 2.5; }
 }
 
 .yield-dom-flash {
