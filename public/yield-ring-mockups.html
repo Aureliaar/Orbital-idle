@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yield Ring on Resonator — Mockups</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=JetBrains+Mono:wght@400;700&display=swap');
+
+  :root {
+    --paper: #f5f0e8;
+    --bg: #eae4d9;
+    --text-h: #1a120a;
+    --text: #6b6375;
+    --text-3: #a094ab;
+    --border: #c8c0b8;
+    --rule-thin: #d4cdc4;
+    --accent: #aa3bff;
+    --display: 'IM Fell English', serif;
+    --sc: 'IM Fell English SC', serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-h);
+    font-family: var(--display);
+    padding: 40px 20px 80px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-style: italic;
+    font-size: 1.8rem;
+    text-align: center;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 0.88rem;
+    color: var(--text);
+    margin-bottom: 36px;
+    line-height: 1.5;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 32px;
+  }
+
+  .mockup {
+    background: var(--paper);
+    border: 0.5px solid var(--rule-thin);
+    padding: 24px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mockup h2 {
+    font-family: var(--sc);
+    font-size: 0.64rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 400;
+    color: var(--text-3);
+    border-bottom: 0.5px solid var(--rule-thin);
+    padding-bottom: 4px;
+    width: 100%;
+    text-align: left;
+  }
+  .mockup h2 strong { color: var(--text-h); font-weight: 400; }
+
+  .mockup-desc {
+    font-family: var(--display);
+    font-style: italic;
+    font-size: 0.8rem;
+    color: var(--text);
+    width: 100%;
+    text-align: left;
+    line-height: 1.45;
+  }
+
+  .mockup-pros {
+    width: 100%;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    color: var(--text);
+    line-height: 1.65;
+  }
+  .mockup-pros span { color: var(--text-3); }
+
+  .helix-wrap {
+    width: 400px;
+    max-width: 100%;
+    aspect-ratio: 1;
+  }
+  .helix-wrap svg { width: 100%; height: 100%; }
+
+  .label { font-family: var(--display); font-style: italic; }
+  .label-sc { font-family: var(--sc); letter-spacing: 0.18em; }
+  .label-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<h1>Yield Ring on Resonator</h1>
+<p class="subtitle">
+  The yield wheel lives as an outer ring on the helix itself — same chroma angles,<br>
+  one "octave" beyond the partial cloud. Mostly dormant; lights up once all 7 notes unlock.
+</p>
+
+<div class="grid">
+
+<!-- ============================================ -->
+<!-- Shared helix geometry constants:             -->
+<!-- CX=200 CY=200 R_BASE=64 R_OUTER=180         -->
+<!-- Yield ring sits at R_YIELD ≈ 196-210         -->
+<!-- Note angles (just intonation chroma):        -->
+<!--   C: -90°  D: -18.5°  E: 48.7°              -->
+<!--   F: 98.0° G: 162.0°  A: 225.3° B: 278.7°   -->
+<!-- (Approximated for visual clarity)            -->
+<!-- ============================================ -->
+
+<!-- A. DORMANT EMBERS -->
+<div class="mockup">
+  <h2><strong>A</strong> &middot; Dormant Embers</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- Chroma compass on base ring -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/><!-- C -->
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/><!-- D -->
+      <text x="248" y="131" text-anchor="middle" class="label" font-size="13" fill="#1a120a" fill-opacity="0.75">D</text>
+      <circle cx="255" cy="164" r="5.5" fill="#6d8f18" fill-opacity="0.5"/><!-- E (slotted) -->
+      <text x="273" y="162" text-anchor="middle" class="label" font-size="13" fill="#6d8f18" font-weight="600">E</text>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/><!-- F -->
+      <text x="249" y="230" text-anchor="middle" class="label" font-size="13" fill="#1a120a" fill-opacity="0.75">F</text>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/><!-- G -->
+      <text x="185" y="270" text-anchor="middle" class="label" font-size="13" fill="#1a120a" fill-opacity="0.75">G</text>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/><!-- A -->
+      <text x="132" y="232" text-anchor="middle" class="label" font-size="13" fill="#1a120a" fill-opacity="0.75">A</text>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/><!-- B -->
+      <text x="127" y="175" text-anchor="middle" class="label" font-size="13" fill="#1a120a" fill-opacity="0.75">B</text>
+
+      <!-- Some coincidence hint dots (faint) -->
+      <circle cx="200" cy="78" r="6.5" fill="#888" fill-opacity="0.06" stroke="#888" stroke-opacity="0.3" stroke-width="1"/>
+      <circle cx="260" cy="130" r="6.5" fill="#888" fill-opacity="0.06" stroke="#888" stroke-opacity="0.3" stroke-width="1"/>
+      <circle cx="280" cy="200" r="6.5" fill="#888" fill-opacity="0.06" stroke="#888" stroke-opacity="0.3" stroke-width="1"/>
+
+      <!-- A few fake cloud partials for context -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.6"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.4"/>
+      <circle cx="255" cy="130" r="7" fill="#dc4836" fill-opacity="0.3"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.55"/>
+      <circle cx="255" cy="98" r="5" fill="#6d8f18" fill-opacity="0.3"/>
+
+      <!-- ===== YIELD RING: DORMANT ===== -->
+      <!-- Outer guide ring — barely visible -->
+      <circle cx="200" cy="200" r="196" fill="none" stroke="#c8c0b8" stroke-width="0.5" stroke-opacity="0.2" stroke-dasharray="1 6"/>
+
+      <!-- Tiny ember dots at each note's chroma angle, just past the outer octave ring -->
+      <!-- These are the "seeds" that grow once the yield panel unlocks -->
+      <circle cx="200" cy="4" r="3" fill="#dc4836" fill-opacity="0.12"/><!-- C -->
+      <circle cx="296" cy="18" r="2.5" fill="#b86b1a" fill-opacity="0.08"/><!-- D (not yet invested) -->
+      <circle cx="366" cy="108" r="2.5" fill="#6d8f18" fill-opacity="0.08"/><!-- E -->
+      <circle cx="297" cy="314" r="2.5" fill="#4aa84a" fill-opacity="0.08"/><!-- F -->
+      <circle cx="157" cy="388" r="2.5" fill="#3a9fb8" fill-opacity="0.08"/><!-- G -->
+      <circle cx="49" cy="297" r="2.5" fill="#3a6dc8" fill-opacity="0.08"/><!-- A -->
+      <circle cx="25" cy="139" r="2.5" fill="#9a3ac8" fill-opacity="0.08"/><!-- B -->
+
+      <!-- Center -->
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+    </svg>
+  </div>
+  <p class="mockup-desc">Before the yield panel unlocks: tiny ember dots sit at each note's chroma angle on a faint outer guide ring. You might not even notice them. Once all 7 notes unlock, they wake up.</p>
+  <p class="mockup-pros">
+    <span>+</span> zero clutter in the early game<br>
+    <span>+</span> the "oh, those dots were always there" reveal<br>
+    <span>+</span> positions already encode the circle-of-fifths topology
+  </p>
+</div>
+
+<!-- B. AWAKENED — NODES WITH GAUGE ARCS -->
+<div class="mockup">
+  <h2><strong>B</strong> &middot; Awakened Gauges</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- Chroma compass (slotted: C, E) -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/>
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/>
+      <circle cx="255" cy="164" r="5.5" fill="#6d8f18" fill-opacity="0.5"/>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/>
+
+      <!-- Cloud partials -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.35"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.45"/>
+
+      <!-- Center -->
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+
+      <!-- ===== YIELD RING: AWAKENED ===== -->
+      <!-- Flow arcs between nodes (subtle, along the outer ring path) -->
+      <!-- C→G flow arc (C costs G currency) -->
+      <path d="M200,4 A196,196 0 0,1 157,388" fill="none" stroke="#3a9fb8" stroke-width="1.5" stroke-opacity="0.18" stroke-dasharray="3 5"/>
+      <!-- G→D flow -->
+      <path d="M157,388 A196,196 0 0,1 296,18" fill="none" stroke="#b86b1a" stroke-width="0.8" stroke-opacity="0.1" stroke-dasharray="2 5"/>
+
+      <!-- C: lvl 3 — prominent node with gauge -->
+      <g transform="translate(200, 4)">
+        <circle r="14" fill="#f5f0e8" stroke="#dc4836" stroke-width="1.5"/>
+        <circle r="14" fill="#dc4836" fill-opacity="0.06"/>
+        <!-- Gauge arc: 3 levels filled -->
+        <circle r="11" fill="none" stroke="#dc4836" stroke-width="2.5" stroke-opacity="0.45"
+          stroke-dasharray="29 40" stroke-dashoffset="17.3"/>
+        <!-- Progress arc for lvl 4 -->
+        <circle r="11" fill="none" stroke="#dc4836" stroke-width="2.5" stroke-opacity="0.15"
+          stroke-dasharray="6.5 62.5" stroke-dashoffset="-11.7"/>
+        <text x="0" y="-1" text-anchor="middle" class="label" font-size="10" fill="#dc4836">C</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="6" fill="#dc4836">&#215;3.4</text>
+        <!-- Level badge -->
+        <circle cx="9" cy="-9" r="5.5" fill="#dc4836"/>
+        <text x="9" y="-7" text-anchor="middle" class="label-mono" font-size="5.5" font-weight="700" fill="#f5f0e8">3</text>
+      </g>
+
+      <!-- G: lvl 2 -->
+      <g transform="translate(157, 388)">
+        <circle r="12" fill="#f5f0e8" stroke="#3a9fb8" stroke-width="1.2"/>
+        <circle r="12" fill="#3a9fb8" fill-opacity="0.05"/>
+        <circle r="9" fill="none" stroke="#3a9fb8" stroke-width="2" stroke-opacity="0.4"
+          stroke-dasharray="16 40.5" stroke-dashoffset="14.1"/>
+        <text x="0" y="-1" text-anchor="middle" class="label" font-size="10" fill="#3a9fb8">G</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="6" fill="#3a9fb8">&#215;2.2</text>
+        <circle cx="8" cy="-7" r="5" fill="#3a9fb8"/>
+        <text x="8" y="-5" text-anchor="middle" class="label-mono" font-size="5" font-weight="700" fill="#f5f0e8">2</text>
+      </g>
+
+      <!-- D: lvl 1 -->
+      <g transform="translate(296, 18)">
+        <circle r="11" fill="#f5f0e8" stroke="#b86b1a" stroke-width="1"/>
+        <circle r="8" fill="none" stroke="#b86b1a" stroke-width="2" stroke-opacity="0.35"
+          stroke-dasharray="7 43.3" stroke-dashoffset="12.6"/>
+        <text x="0" y="-1" text-anchor="middle" class="label" font-size="9" fill="#b86b1a">D</text>
+        <text x="0" y="7" text-anchor="middle" class="label-mono" font-size="5.5" fill="#b86b1a">&#215;1.5</text>
+        <circle cx="7" cy="-6" r="4.5" fill="#b86b1a"/>
+        <text x="7" y="-4" text-anchor="middle" class="label-mono" font-size="4.5" font-weight="700" fill="#f5f0e8">1</text>
+      </g>
+
+      <!-- E: lvl 0, faint -->
+      <g transform="translate(366, 108)">
+        <circle r="9" fill="#f5f0e8" stroke="#6d8f18" stroke-width="0.6" stroke-opacity="0.35"/>
+        <text x="0" y="0" text-anchor="middle" class="label" font-size="9" fill="#6d8f18" opacity="0.45">E</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="5" fill="#6b6375" opacity="0.4">&#215;1</text>
+      </g>
+
+      <!-- F: lvl 0 -->
+      <g transform="translate(297, 314)">
+        <circle r="9" fill="#f5f0e8" stroke="#4aa84a" stroke-width="0.6" stroke-opacity="0.35"/>
+        <text x="0" y="0" text-anchor="middle" class="label" font-size="9" fill="#4aa84a" opacity="0.45">F</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="5" fill="#6b6375" opacity="0.4">&#215;1</text>
+      </g>
+
+      <!-- A: lvl 0 -->
+      <g transform="translate(49, 297)">
+        <circle r="9" fill="#f5f0e8" stroke="#3a6dc8" stroke-width="0.6" stroke-opacity="0.35"/>
+        <text x="0" y="0" text-anchor="middle" class="label" font-size="9" fill="#3a6dc8" opacity="0.45">A</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="5" fill="#6b6375" opacity="0.4">&#215;1</text>
+      </g>
+
+      <!-- B: lvl 0 -->
+      <g transform="translate(25, 139)">
+        <circle r="9" fill="#f5f0e8" stroke="#9a3ac8" stroke-width="0.6" stroke-opacity="0.35"/>
+        <text x="0" y="0" text-anchor="middle" class="label" font-size="9" fill="#9a3ac8" opacity="0.45">B</text>
+        <text x="0" y="8" text-anchor="middle" class="label-mono" font-size="5" fill="#6b6375" opacity="0.4">&#215;1</text>
+      </g>
+    </svg>
+  </div>
+  <p class="mockup-desc">Once all 7 unlock, the embers grow into gauge nodes. Invested notes swell; gauge arcs show level + progress. Cost-flow arcs trace the outer ring between nodes. Leveled nodes are tappable to buy the next level. Uninvested nodes stay small and faint.</p>
+  <p class="mockup-pros">
+    <span>+</span> the yield ring IS the helix's outermost octave<br>
+    <span>+</span> investment reads as size &mdash; big nodes dominate the rim<br>
+    <span>+</span> gauge arcs encode level + progress in one shape<br>
+    <span>-</span> nodes at the edge may clip on small screens
+  </p>
+</div>
+
+<!-- C. BLOOM PETALS -->
+<div class="mockup">
+  <h2><strong>C</strong> &middot; Bloom Petals</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- Chroma compass -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/>
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/>
+      <circle cx="255" cy="164" r="5.5" fill="#6d8f18" fill-opacity="0.5"/>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/>
+
+      <!-- Cloud partials -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.35"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.45"/>
+
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+
+      <!-- ===== YIELD RING: BLOOM PETALS ===== -->
+      <!-- Each level adds a petal-shaped arc radiating outward from the
+           outer octave ring. The petals grow like flower petals or solar
+           flares — level 0 = nothing, level 3 = three nested petals. -->
+
+      <!-- C: 3 petals radiating outward from (200, 20) -->
+      <defs>
+        <radialGradient id="gc" cx="50%" cy="100%" r="100%">
+          <stop offset="0%" stop-color="#dc4836" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#dc4836" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="gg" cx="50%" cy="100%" r="100%">
+          <stop offset="0%" stop-color="#3a9fb8" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="#3a9fb8" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="gd" cx="50%" cy="100%" r="100%">
+          <stop offset="0%" stop-color="#b86b1a" stop-opacity="0.2"/>
+          <stop offset="100%" stop-color="#b86b1a" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <!-- C blooms: 3 nested petals, biggest = outermost -->
+      <ellipse cx="200" cy="7" rx="22" ry="16" fill="url(#gc)" transform="rotate(0 200 200)"/>
+      <ellipse cx="200" cy="12" rx="16" ry="11" fill="#dc4836" fill-opacity="0.1" transform="rotate(0 200 200)"/>
+      <ellipse cx="200" cy="16" rx="10" ry="7" fill="#dc4836" fill-opacity="0.15" transform="rotate(0 200 200)"/>
+      <!-- C dot at base of bloom -->
+      <circle cx="200" cy="20" r="4" fill="#dc4836" fill-opacity="0.5" stroke="#dc4836" stroke-width="0.8"/>
+      <text x="200" y="10" text-anchor="middle" class="label-mono" font-size="6" fill="#dc4836" fill-opacity="0.8">&#215;3.4</text>
+
+      <!-- G blooms: 2 petals -->
+      <!-- G sits at angle ~252° from center, so (200+196*cos(252°), 200+196*sin(252°)) ≈ (139, 393) but using approximated positions -->
+      <ellipse cx="143" cy="391" rx="15" ry="10" fill="url(#gg)"/>
+      <ellipse cx="148" cy="388" rx="9" ry="6" fill="#3a9fb8" fill-opacity="0.12"/>
+      <circle cx="153" cy="384" r="3.5" fill="#3a9fb8" fill-opacity="0.4" stroke="#3a9fb8" stroke-width="0.6"/>
+      <text x="138" y="398" text-anchor="middle" class="label-mono" font-size="5.5" fill="#3a9fb8" fill-opacity="0.7">&#215;2.2</text>
+
+      <!-- D bloom: 1 petal -->
+      <ellipse cx="298" cy="16" rx="10" ry="7" fill="url(#gd)"/>
+      <circle cx="296" cy="21" r="3" fill="#b86b1a" fill-opacity="0.35" stroke="#b86b1a" stroke-width="0.6"/>
+      <text x="306" y="14" text-anchor="middle" class="label-mono" font-size="5" fill="#b86b1a" fill-opacity="0.6">&#215;1.5</text>
+
+      <!-- Uninvested: just dim dots on the outer ring -->
+      <circle cx="366" cy="108" r="2" fill="#6d8f18" fill-opacity="0.1"/>
+      <circle cx="297" cy="314" r="2" fill="#4aa84a" fill-opacity="0.1"/>
+      <circle cx="49" cy="297" r="2" fill="#3a6dc8" fill-opacity="0.1"/>
+      <circle cx="25" cy="139" r="2" fill="#9a3ac8" fill-opacity="0.1"/>
+    </svg>
+  </div>
+  <p class="mockup-desc">Each yield level adds a "petal" — an elliptical glow radiating outward from the helix rim. Lvl 0 = a dim dot. Lvl 3 = three nested petals flaring out like a solar prominence. The helix grows visual weight where you invest. Very organic, very observatory.</p>
+  <p class="mockup-pros">
+    <span>+</span> beautiful — the helix literally <em>blooms</em> where you invest<br>
+    <span>+</span> no hard edges, blends with the cloud aesthetic<br>
+    <span>+</span> zero early-game clutter — just dots, then petals emerge<br>
+    <span>-</span> hard to read precise level without counting petals<br>
+    <span>-</span> no affordance for "tap to buy" — needs a separate interaction
+  </p>
+</div>
+
+<!-- D. COMPASS EXTENSION -->
+<div class="mockup">
+  <h2><strong>D</strong> &middot; Compass Extension</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- ===== YIELD = SPOKE EXTENSION ===== -->
+      <!-- Each note's compass spoke extends beyond the base ring by
+           an amount proportional to its yield level. The spoke becomes
+           a "needle" — longer = higher yield. Level 0 = flush with
+           base ring. Progress = partial extension. -->
+
+      <!-- Spokes from center through compass position to yield extent -->
+      <!-- C: lvl 3 — spoke extends far (to ~r=196) -->
+      <line x1="200" y1="200" x2="200" y2="4" stroke="#dc4836" stroke-width="1.5" stroke-opacity="0.2"/>
+      <line x1="200" y1="136" x2="200" y2="16" stroke="#dc4836" stroke-width="2" stroke-opacity="0.35"/>
+      <!-- Level tick marks on the spoke -->
+      <line x1="196" y1="92" x2="204" y2="92" stroke="#dc4836" stroke-width="1" stroke-opacity="0.3"/>
+      <line x1="196" y1="62" x2="204" y2="62" stroke="#dc4836" stroke-width="1" stroke-opacity="0.3"/>
+      <line x1="196" y1="32" x2="204" y2="32" stroke="#dc4836" stroke-width="1" stroke-opacity="0.3"/>
+      <!-- Needle head -->
+      <circle cx="200" cy="16" r="4" fill="#dc4836" fill-opacity="0.5" stroke="#dc4836" stroke-width="1"/>
+      <text x="210" y="18" class="label-mono" font-size="6" fill="#dc4836">3</text>
+
+      <!-- G: lvl 2 — medium spoke -->
+      <!-- G angle ≈ 252°, using position approximation -->
+      <line x1="200" y1="200" x2="153" y2="386" stroke="#3a9fb8" stroke-width="1" stroke-opacity="0.12"/>
+      <line x1="185" y1="252" x2="160" y2="370" stroke="#3a9fb8" stroke-width="1.5" stroke-opacity="0.25"/>
+      <line x1="168" y1="330" x2="175" y2="328" stroke="#3a9fb8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <line x1="162" y1="356" x2="169" y2="354" stroke="#3a9fb8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <circle cx="160" cy="370" r="3.5" fill="#3a9fb8" fill-opacity="0.4" stroke="#3a9fb8" stroke-width="0.8"/>
+      <text x="150" y="373" class="label-mono" font-size="6" fill="#3a9fb8">2</text>
+
+      <!-- D: lvl 1 — short spoke -->
+      <line x1="200" y1="200" x2="305" y2="17" stroke="#b86b1a" stroke-width="0.8" stroke-opacity="0.08"/>
+      <line x1="232" y1="139" x2="270" y2="70" stroke="#b86b1a" stroke-width="1.2" stroke-opacity="0.2"/>
+      <line x1="253" y1="100" x2="258" y2="103" stroke="#b86b1a" stroke-width="0.8" stroke-opacity="0.2"/>
+      <circle cx="270" cy="70" r="3" fill="#b86b1a" fill-opacity="0.3" stroke="#b86b1a" stroke-width="0.6"/>
+      <text x="278" y="68" class="label-mono" font-size="5.5" fill="#b86b1a">1</text>
+
+      <!-- Uninvested notes: compass dots only, no spoke extension -->
+      <!-- E -->
+      <line x1="200" y1="200" x2="375" y2="107" stroke="#6d8f18" stroke-width="0.5" stroke-opacity="0.06"/>
+      <circle cx="255" cy="164" r="3.5" fill="#6d8f18" fill-opacity="0.22"/>
+      <!-- F -->
+      <line x1="200" y1="200" x2="303" y2="320" stroke="#4aa84a" stroke-width="0.5" stroke-opacity="0.06"/>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/>
+      <!-- A -->
+      <line x1="200" y1="200" x2="45" y2="303" stroke="#3a6dc8" stroke-width="0.5" stroke-opacity="0.06"/>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/>
+      <!-- B -->
+      <line x1="200" y1="200" x2="22" y2="137" stroke="#9a3ac8" stroke-width="0.5" stroke-opacity="0.06"/>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/>
+
+      <!-- Compass base dots -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/>
+
+      <!-- Cloud partials -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.35"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.45"/>
+
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+    </svg>
+  </div>
+  <p class="mockup-desc">No ring at all — instead, each compass spoke extends outward by an amount proportional to its yield level, with tick marks for each completed level. Like a clock hand or compass needle that grows longer as you invest. The helix becomes a star with uneven rays.</p>
+  <p class="mockup-pros">
+    <span>+</span> very clean — no new shapes, just longer lines<br>
+    <span>+</span> investment asymmetry is instantly readable (long vs short rays)<br>
+    <span>+</span> tick marks give precise level at a glance<br>
+    <span>+</span> dormant = normal compass, awakened = compass grows<br>
+    <span>-</span> long spokes cross the coincidence zone &mdash; visual conflict with partials<br>
+    <span>-</span> less obvious where to tap to buy
+  </p>
+</div>
+
+<!-- E. ARC WEDGE (PIE) RING -->
+<div class="mockup">
+  <h2><strong>E</strong> &middot; Arc Wedge Ring</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <defs>
+        <!-- Clipping ring: only show the outer annulus -->
+        <clipPath id="ring-clip">
+          <path d="M200,0 A200,200 0 1,1 199.99,0 Z M200,18 A182,182 0 1,0 200.01,18 Z" fill-rule="evenodd"/>
+        </clipPath>
+      </defs>
+
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- Chroma compass -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/>
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/>
+      <circle cx="255" cy="164" r="5.5" fill="#6d8f18" fill-opacity="0.5"/>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/>
+
+      <!-- Cloud partials -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.35"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.45"/>
+
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+
+      <!-- ===== YIELD RING: ARC WEDGES ===== -->
+      <!-- A thin outer ring divided into 7 wedges. Each wedge fills
+           radially (inner to outer) by yield level. Like the arc segments
+           mockup but as a ring hugging the helix instead of standalone. -->
+
+      <!-- Background ring -->
+      <circle cx="200" cy="200" r="193" fill="none" stroke="#d4cdc4" stroke-width="12" stroke-opacity="0.15"/>
+
+      <!-- Wedge fills: thick arc strokes clipped to ring annulus. -->
+      <!-- Each note's angular span ≈ 51.4° centered on its chroma angle. -->
+      <!-- C wedge: lvl 3 of 5, fill = 60% of the wedge's radial thickness -->
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#dc4836" stroke-width="12" stroke-opacity="0.3"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="347"/>
+      <!-- C fill (inner portion of wedge = level fraction) -->
+      <circle cx="200" cy="200" r="190" fill="none"
+        stroke="#dc4836" stroke-width="7" stroke-opacity="0.2"
+        stroke-dasharray="86.5 1106.4" stroke-dashoffset="344"/>
+
+      <!-- G wedge: lvl 2 -->
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#3a9fb8" stroke-width="12" stroke-opacity="0.2"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="693"/>
+
+      <!-- D wedge: lvl 1 -->
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#b86b1a" stroke-width="12" stroke-opacity="0.12"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="520"/>
+
+      <!-- Uninvested wedges — just the faintest tint -->
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#6d8f18" stroke-width="12" stroke-opacity="0.04"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="175"/>
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#4aa84a" stroke-width="12" stroke-opacity="0.04"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="866"/>
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#3a6dc8" stroke-width="12" stroke-opacity="0.04"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="1040"/>
+      <circle cx="200" cy="200" r="193" fill="none"
+        stroke="#9a3ac8" stroke-width="12" stroke-opacity="0.04"
+        stroke-dasharray="86.5 1126.9" stroke-dashoffset="1213"/>
+
+      <!-- Wedge dividers -->
+      <g stroke="#f5f0e8" stroke-width="1.5" opacity="0.7">
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(0 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(51.4 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(102.8 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(154.3 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(205.7 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(257.1 200 200)"/>
+        <line x1="200" y1="187" x2="200" y2="200" transform="rotate(308.6 200 200)"/>
+      </g>
+    </svg>
+  </div>
+  <p class="mockup-desc">A thin ring hugging the helix's outer edge, divided into 7 wedges. Wedge fill opacity = yield level. Dormant = the ring is barely there. Invested = the relevant wedges glow. The simplest integration — adds one visual layer without any new shapes.</p>
+  <p class="mockup-pros">
+    <span>+</span> minimal — one ring, no nodes, no arrows<br>
+    <span>+</span> the "mostly hidden" state is just an almost-invisible ring<br>
+    <span>+</span> tapping a wedge to buy feels natural<br>
+    <span>+</span> reads as a progress/EQ meter around the instrument<br>
+    <span>-</span> hard to show multiplier or level number<br>
+    <span>-</span> cost-flow relationship is invisible<br>
+    <span>-</span> less "wow" factor than nodes or petals
+  </p>
+</div>
+
+<!-- F. HYBRID: RING + TAPPABLE NODES ON DEMAND -->
+<div class="mockup">
+  <h2><strong>F</strong> &middot; Hybrid: Ring + Expandable Nodes</h2>
+  <div class="helix-wrap">
+    <svg viewBox="0 0 400 400">
+      <!-- Octave guide rings -->
+      <circle cx="200" cy="200" r="64" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-opacity="0.7"/>
+      <circle cx="200" cy="200" r="93" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="122" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="151" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.45"/>
+      <circle cx="200" cy="200" r="180" fill="none" stroke="#c8c0b8" stroke-width="1" stroke-dasharray="2 5" stroke-opacity="0.35"/>
+
+      <!-- Chroma compass -->
+      <circle cx="200" cy="136" r="5.5" fill="#dc4836" fill-opacity="0.5"/>
+      <text x="200" y="119" text-anchor="middle" class="label" font-size="13" fill="#dc4836" font-weight="600">C</text>
+      <circle cx="232" cy="139" r="3.5" fill="#b86b1a" fill-opacity="0.22"/>
+      <circle cx="255" cy="164" r="5.5" fill="#6d8f18" fill-opacity="0.5"/>
+      <circle cx="233" cy="224" r="3.5" fill="#4aa84a" fill-opacity="0.22"/>
+      <circle cx="185" cy="252" r="3.5" fill="#3a9fb8" fill-opacity="0.22"/>
+      <circle cx="148" cy="224" r="3.5" fill="#3a6dc8" fill-opacity="0.22"/>
+      <circle cx="144" cy="171" r="3.5" fill="#9a3ac8" fill-opacity="0.22"/>
+
+      <!-- Cloud partials -->
+      <circle cx="200" cy="136" r="10" fill="#dc4836" fill-opacity="0.5"/>
+      <circle cx="200" cy="78" r="6" fill="#dc4836" fill-opacity="0.35"/>
+      <circle cx="255" cy="164" r="10" fill="#6d8f18" fill-opacity="0.45"/>
+
+      <circle cx="200" cy="200" r="2" fill="#c8c0b8" fill-opacity="0.6"/>
+
+      <!-- ===== HYBRID: quiet ring + one expanded node ===== -->
+      <!-- Default state: thin quiet ring with small dots -->
+      <circle cx="200" cy="200" r="196" fill="none" stroke="#d4cdc4" stroke-width="0.5" stroke-opacity="0.25" stroke-dasharray="1 6"/>
+
+      <!-- Small indicator dots for all notes -->
+      <!-- G: 2 dots (level indicator) -->
+      <circle cx="157" cy="388" r="3" fill="#3a9fb8" fill-opacity="0.25" stroke="#3a9fb8" stroke-width="0.6"/>
+      <circle cx="153" cy="392" r="1.5" fill="#3a9fb8" fill-opacity="0.35"/>
+      <circle cx="161" cy="392" r="1.5" fill="#3a9fb8" fill-opacity="0.35"/>
+      <!-- D: 1 dot -->
+      <circle cx="296" cy="18" r="3" fill="#b86b1a" fill-opacity="0.2" stroke="#b86b1a" stroke-width="0.5"/>
+      <circle cx="296" cy="24" r="1.3" fill="#b86b1a" fill-opacity="0.3"/>
+      <!-- E, F, A, B: empty -->
+      <circle cx="366" cy="108" r="2" fill="#6d8f18" fill-opacity="0.08"/>
+      <circle cx="297" cy="314" r="2" fill="#4aa84a" fill-opacity="0.08"/>
+      <circle cx="49" cy="297" r="2" fill="#3a6dc8" fill-opacity="0.08"/>
+      <circle cx="25" cy="139" r="2" fill="#9a3ac8" fill-opacity="0.08"/>
+
+      <!-- C: EXPANDED NODE (user tapped it or it's affordable) -->
+      <!-- This is the "switched on" state for one node -->
+      <g transform="translate(200, 4)">
+        <!-- Expanded card background -->
+        <rect x="-42" y="-22" width="84" height="48" rx="2" fill="#f5f0e8" stroke="#dc4836" stroke-width="1" stroke-opacity="0.6"/>
+        <!-- Level + multiplier -->
+        <text x="-32" y="-6" class="label" font-size="12" fill="#dc4836">C</text>
+        <text x="-6" y="-6" class="label-mono" font-size="7" fill="#dc4836" font-weight="700">lvl 3</text>
+        <text x="-32" y="8" class="label-mono" font-size="9" fill="#dc4836">&#215;3.38</text>
+        <text x="8" y="8" class="label" font-size="7" fill="#a094ab">&#8594;</text>
+        <text x="18" y="8" class="label-mono" font-size="8" fill="#6b6375">&#215;5.1</text>
+        <!-- Cost line -->
+        <text x="-32" y="19" class="label-mono" font-size="6" fill="#6b6375">48</text>
+        <circle cx="-20" cy="17" r="3" fill="#3a9fb8" fill-opacity="0.5"/>
+        <text x="-15" y="19" class="label-mono" font-size="5" fill="#3a9fb8">G</text>
+        <!-- Progress bar -->
+        <rect x="-32" y="22" width="64" height="2" rx="1" fill="#d4cdc4" fill-opacity="0.4"/>
+        <rect x="-32" y="22" width="44" height="2" rx="1" fill="#dc4836" fill-opacity="0.5"/>
+      </g>
+
+      <!-- Flow arrow from expanded C to G (showing cost direction) -->
+      <path d="M200,26 Q240,60 220,100 Q200,160 175,300 Q165,350 157,380" fill="none" stroke="#3a9fb8" stroke-width="1" stroke-opacity="0.2" stroke-dasharray="4 4"/>
+      <text x="230" y="120" class="label" font-size="8" fill="#3a9fb8" fill-opacity="0.5" transform="rotate(70 230 120)">costs G</text>
+    </svg>
+  </div>
+  <p class="mockup-desc">Default: a whisper-quiet ring with tiny dots encoding level (like pips on a watch dial). Tapping a dot — or any dot becoming affordable — expands it into a detail card showing level, multiplier, cost, and progress. Only one card open at a time. The cost arrow reveals itself only for the expanded node.</p>
+  <p class="mockup-pros">
+    <span>+</span> <strong>best of both:</strong> quiet ring in idle, full detail on demand<br>
+    <span>+</span> cost-flow arrow only appears in context &mdash; not always cluttering<br>
+    <span>+</span> the "card" can show exact cost, progress bar, multiplier transition<br>
+    <span>+</span> affordable nodes could auto-pulse to draw attention<br>
+    <span>-</span> the expanded card partially overlaps the helix (but partials fly past it anyway)<br>
+    <span>-</span> interaction model needs clear "tap to expand / tap to buy" distinction
+  </p>
+</div>
+
+</div>
+
+</body>
+</html>
