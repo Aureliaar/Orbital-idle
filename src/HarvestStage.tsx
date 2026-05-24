@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAudioGraph, teardownAudioGraph } from './audio'
 import type { AudioGraph } from './audio'
 import { BODIES, ratioLabel as toRatioLabel } from './bodies'
-import type { BodyId } from './bodies'
+import type { Body, BodyId } from './bodies'
 import {
   AUTO_PLUCK_PENALTY,
   COINCIDENCE_TOL,
@@ -124,6 +124,16 @@ type HintGlow = {
   color: string
 }
 
+type YieldInfoLabel = {
+  id: number
+  noteId: BodyId
+  costNoteId: BodyId
+  text: string
+  bornMs: number
+  x: number
+  y: number
+}
+
 // Full "properly hit" feedback: a coincidence fired and minted currency.
 // Each particle eases from its spawn point to a target — usually the DOM
 // rect of the currency chip the payout went to (looked up via
@@ -159,6 +169,24 @@ type Props = {
   noteYieldMul: (id: BodyId) => number
   onSlotChange: (slotIdx: number, newNotes: readonly BodyId[]) => void
   onEarn: (delta: CurrencyPurse) => void
+  yieldUnlocked: boolean
+  noteYieldLvls: Partial<Record<BodyId, number>>
+  yieldAffordable: ReadonlySet<BodyId>
+  yieldCostNote: (id: BodyId) => BodyId
+  yieldInfo: (id: BodyId) => { lvl: number; mul: number; nextMul: number; costAmount: number; costNote: BodyId }
+  onBuyYield: (id: BodyId) => void
+}
+
+// Yield ring geometry. Sits just outside the outermost octave guide ring.
+const R_YIELD = 194
+const YIELD_RING_W = 12
+const YIELD_CIRCUMFERENCE = 2 * Math.PI * R_YIELD
+const WEDGE_ARC = YIELD_CIRCUMFERENCE / 7
+const WEDGE_GAP = 3
+
+// Chroma angle for each note's fundamental — same formula used by the compass.
+function bodyChromaAngle(body: Body): number {
+  return chromaAngleOf(TONIC_HZ * body.ratio)
 }
 
 export function HarvestStage({
@@ -170,21 +198,31 @@ export function HarvestStage({
   noteYieldMul,
   onSlotChange,
   onEarn,
+  yieldUnlocked,
+  noteYieldLvls,
+  yieldAffordable,
+  yieldCostNote,
+  yieldInfo,
+  onBuyYield,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const cloudGroupRef = useRef<SVGGElement>(null)
   const burstGroupRef = useRef<SVGGElement>(null)
   const glowGroupRef = useRef<SVGGElement>(null)
   const particleGroupRef = useRef<SVGGElement>(null)
+  const yieldInfoGroupRef = useRef<SVGGElement>(null)
   const emptyHintRef = useRef<SVGTextElement>(null)
   const audioRef = useRef<AudioGraph | null>(null)
   const cloudRef = useRef<Harmonic[]>([])
   const burstsRef = useRef<Burst[]>([])
   const hintGlowsRef = useRef<HintGlow[]>([])
   const particlesRef = useRef<Particle[]>([])
+  const yieldInfosRef = useRef<YieldInfoLabel[]>([])
   const nextBurstIdRef = useRef(1)
   const coolingRef = useRef<Set<number>>(new Set())
   const [cooling, setCooling] = useState<ReadonlySet<number>>(() => new Set())
+  const [yieldFlash, setYieldFlash] = useState<BodyId | null>(null)
+  const [dominantFlash, setDominantFlash] = useState<BodyId | null>(null)
   const [openPickerIdx, setOpenPickerIdx] = useState<number | null>(null)
   const modalRef = useRef<HTMLDivElement | null>(null)
   const lastFocusRef = useRef<HTMLElement | null>(null)
@@ -523,6 +561,34 @@ export function HarvestStage({
           nodes.push(circle)
         }
         particleG.replaceChildren(...nodes)
+      }
+
+      const yieldInfos = yieldInfosRef.current
+      const YIELD_INFO_LIFE_MS = 2000
+      let yW = 0
+      for (let i = 0; i < yieldInfos.length; i++) {
+        if (now - yieldInfos[i].bornMs < YIELD_INFO_LIFE_MS) yieldInfos[yW++] = yieldInfos[i]
+      }
+      yieldInfos.length = yW
+      const yieldG = yieldInfoGroupRef.current
+      if (yieldG) {
+        const nodes: SVGElement[] = []
+        for (const info of yieldInfos) {
+          const u = (now - info.bornMs) / YIELD_INFO_LIFE_MS
+          const alpha = u < 0.7 ? 1 : (1 - u) / 0.3
+          const text = document.createElementNS(SVG_NS, 'text')
+          text.setAttribute('x', info.x.toFixed(1))
+          text.setAttribute('y', (info.y - 6 - 10 * u).toFixed(1))
+          text.setAttribute('text-anchor', 'middle')
+          text.setAttribute('dominant-baseline', 'middle')
+          text.setAttribute('font-family', 'ui-monospace, Menlo, Consolas, monospace')
+          text.setAttribute('font-size', '9')
+          text.setAttribute('fill', PAD_COLORS[info.noteId] ?? '#6b6375')
+          text.setAttribute('fill-opacity', String(Math.max(0, alpha * 0.9)))
+          text.textContent = info.text
+          nodes.push(text)
+        }
+        yieldG.replaceChildren(...nodes)
       }
 
       const isEmpty =
@@ -881,6 +947,38 @@ export function HarvestStage({
     [slots, slotCapacities, unlockedIds, onSlotChange],
   )
 
+  const handleCompassTap = useCallback(
+    (id: BodyId, e: React.PointerEvent) => {
+      e.stopPropagation()
+      if (!yieldUnlocked) return
+      if (yieldAffordable.has(id)) {
+        onBuyYield(id)
+        setYieldFlash(id)
+        window.setTimeout(() => setYieldFlash(null), 400)
+      } else {
+        const info = yieldInfo(id)
+        const body = BODIES.find((b) => b.id === id)
+        if (!body) return
+        const ang = bodyChromaAngle(body)
+        const lx = CX + (R_BASE + 30) * Math.cos(ang)
+        const ly = CY + (R_BASE + 30) * Math.sin(ang)
+        const text = `×${info.mul.toFixed(1)}→×${info.nextMul.toFixed(1)} · ${info.costAmount} ${info.costNote}`
+        yieldInfosRef.current.push({
+          id: nextBurstIdRef.current++,
+          noteId: id,
+          costNoteId: info.costNote,
+          text,
+          bornMs: performance.now(),
+          x: lx,
+          y: ly,
+        })
+        setDominantFlash(info.costNote)
+        window.setTimeout(() => setDominantFlash(null), 1500)
+      }
+    },
+    [yieldUnlocked, yieldAffordable, yieldInfo, onBuyYield],
+  )
+
   // Window-level pointerup so we resolve swipes regardless of where the
   // finger/cursor releases. Trying to do this on the button itself relies
   // on setPointerCapture, which is finicky across browsers and breaks if
@@ -952,9 +1050,40 @@ export function HarvestStage({
           style={{ stroke: 'var(--border)', strokeOpacity: 0.7 }}
         />
 
-        {/* Chroma compass: all 7 diatonic notes anchored at their just-
-            intonation chroma angles on the base ring. Slotted notes glow,
-            unslotted ones stay faint anchors. */}
+        {/* Yield ring: thin outer ring divided into 7 arc wedges. Each
+            wedge's opacity encodes yield level. Only rendered once yield
+            is unlocked (all 7 notes discovered). */}
+        {yieldUnlocked && BODIES.map((body, i) => {
+          const ang = bodyChromaAngle(body)
+          const lvl = noteYieldLvls[body.id] ?? 0
+          const opacity = lvl === 0 ? 0.04 : Math.min(0.45, 0.04 + lvl * 0.09)
+          const color = PAD_COLORS[body.id] ?? '#aa3bff'
+          const costNoteColor = PAD_COLORS[yieldCostNote(body.id)] ?? '#aa3bff'
+          const arcLen = WEDGE_ARC - WEDGE_GAP
+          const offset = -(i * WEDGE_ARC + YIELD_CIRCUMFERENCE / 4 - WEDGE_ARC / 2)
+          const pipAng = ang
+          const pipX = CX + (R_YIELD - YIELD_RING_W / 2 - 1) * Math.cos(pipAng)
+          const pipY = CY + (R_YIELD - YIELD_RING_W / 2 - 1) * Math.sin(pipAng)
+          return (
+            <g key={`yield-${body.id}`}>
+              <circle
+                cx={CX}
+                cy={CY}
+                r={R_YIELD}
+                fill="none"
+                stroke={color}
+                strokeWidth={YIELD_RING_W}
+                strokeOpacity={opacity}
+                strokeDasharray={`${arcLen.toFixed(1)} ${(YIELD_CIRCUMFERENCE - arcLen).toFixed(1)}`}
+                strokeDashoffset={offset.toFixed(1)}
+              />
+              <circle cx={pipX} cy={pipY} r={2} fill={costNoteColor} fillOpacity={lvl > 0 ? 0.4 : 0.15} />
+            </g>
+          )
+        })}
+
+        {/* Chroma compass: diatonic notes on the base ring. When yield
+            is unlocked, dots become tappable upgrade buttons. */}
         {BODIES.map((body) => {
           const ang = chromaAngleOf(TONIC_HZ * body.ratio)
           const x = CX + R_BASE * Math.cos(ang)
@@ -963,15 +1092,37 @@ export function HarvestStage({
           const ly = CY + (R_BASE + 17) * Math.sin(ang)
           const isOn = slotted.has(body.id)
           const color = PAD_COLORS[body.id] ?? '#aa3bff'
+          const lvl = noteYieldLvls[body.id] ?? 0
+          const isAffordable = yieldUnlocked && yieldAffordable.has(body.id)
+          const isFlashing = yieldFlash === body.id
+          const isDomFlash = dominantFlash === body.id
+          const tappable = yieldUnlocked
           return (
-            <g key={body.id}>
+            <g
+              key={body.id}
+              onPointerDown={tappable ? (e) => handleCompassTap(body.id, e) : undefined}
+              style={tappable ? { cursor: 'pointer' } : undefined}
+            >
               <circle
                 cx={x}
                 cy={y}
-                r={isOn ? 5.5 : 3.5}
+                r={isFlashing ? 9 : isOn ? 5.5 : 3.5}
                 fill={color}
-                fillOpacity={isOn ? 0.5 : 0.22}
+                fillOpacity={isFlashing ? 0.7 : isOn ? 0.5 : 0.22}
+                className={isAffordable ? 'yield-pulse' : isDomFlash ? 'yield-dom-flash' : undefined}
               />
+              {isAffordable && (
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={8}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1}
+                  strokeOpacity={0.4}
+                  className="yield-pulse-ring"
+                />
+              )}
               <text
                 x={lx}
                 y={ly}
@@ -983,7 +1134,7 @@ export function HarvestStage({
                 fill={isOn ? color : '#1a120a'}
                 fillOpacity={isOn ? 1 : 0.75}
               >
-                {body.id}
+                {body.id}{yieldUnlocked && lvl > 0 ? String.fromCharCode(0x2080 + lvl) : ''}
               </text>
             </g>
           )
@@ -1039,6 +1190,9 @@ export function HarvestStage({
 
         {/* Particles — kinetic reward shower when a coincidence fires. */}
         <g ref={particleGroupRef} />
+
+        {/* Yield info labels — floating text when tapping non-affordable compass dots. */}
+        <g ref={yieldInfoGroupRef} />
 
         {/* Empty-state hint — faded in/out from rAF when both layers empty.
             Sits inside the base ring so it doesn't fight the chroma compass. */}

@@ -529,140 +529,6 @@ function ReadyBadge() {
   )
 }
 
-// Circle-of-fifths order for the yield wheel layout.
-const FIFTHS_ORDER: readonly BodyId[] = ['C', 'G', 'D', 'A', 'E', 'B', 'F']
-
-type YieldOption = {
-  id: BodyId
-  lvl: number
-  cost: CurrencyPurse
-  costNote: BodyId
-  gateUnlocked: boolean
-  progress: number
-  affordable: boolean
-}
-
-function YieldWheel({
-  options,
-  onBuy,
-}: {
-  options: readonly YieldOption[]
-  onBuy: (id: BodyId) => void
-}) {
-  const byId = useMemo(() => {
-    const m = new Map<BodyId, YieldOption>()
-    for (const o of options) m.set(o.id, o)
-    return m
-  }, [options])
-
-  const WR = 140
-  const WCX = 170
-  const WCY = 160
-  const VW = 340
-  const VH = 340
-
-  return (
-    <div className="yield-wheel-wrap">
-      <svg
-        className="yield-wheel-svg"
-        viewBox={`0 0 ${VW} ${VH}`}
-        preserveAspectRatio="xMidYMid meet"
-        aria-hidden="true"
-      >
-        {/* Flow arrows: each note's cost arrow points from the note to its
-            dominant (the note whose currency pays for the upgrade). */}
-        {FIFTHS_ORDER.map((id, i) => {
-          const nextId = FIFTHS_ORDER[(i + 1) % 7]
-          const a0 = (i / 7) * 2 * Math.PI - Math.PI / 2
-          const a1 = ((i + 1) / 7) * 2 * Math.PI - Math.PI / 2
-          const gap = 28
-          const x0 = WCX + (WR - gap) * Math.cos(a0)
-          const y0 = WCY + (WR - gap) * Math.sin(a0)
-          const x1 = WCX + (WR - gap) * Math.cos(a1)
-          const y1 = WCY + (WR - gap) * Math.sin(a1)
-          const opt = byId.get(id)
-          const opacity = opt?.affordable ? 0.6 : 0.18
-          const midA = ((i + 0.5) / 7) * 2 * Math.PI - Math.PI / 2
-          const bulge = 18
-          const cx = WCX + (WR - gap + bulge) * Math.cos(midA)
-          const cy = WCY + (WR - gap + bulge) * Math.sin(midA)
-          return (
-            <g key={`arrow-${id}`}>
-              <path
-                d={`M${x0.toFixed(1)} ${y0.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`}
-                fill="none"
-                stroke={PAD_COLORS[nextId]}
-                strokeOpacity={opacity}
-                strokeWidth="1"
-                strokeDasharray={opt?.affordable ? 'none' : '3 4'}
-              />
-              <polygon
-                points={(() => {
-                  const sz = 4.5
-                  const da = Math.atan2(y1 - cy, x1 - cx)
-                  const tx = x1 - Math.cos(da) * 1
-                  const ty = y1 - Math.sin(da) * 1
-                  const p1x = tx - sz * Math.cos(da) + (sz * 0.5) * Math.sin(da)
-                  const p1y = ty - sz * Math.sin(da) - (sz * 0.5) * Math.cos(da)
-                  const p2x = tx - sz * Math.cos(da) - (sz * 0.5) * Math.sin(da)
-                  const p2y = ty - sz * Math.sin(da) + (sz * 0.5) * Math.cos(da)
-                  return `${tx.toFixed(1)},${ty.toFixed(1)} ${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}`
-                })()}
-                fill={PAD_COLORS[nextId]}
-                fillOpacity={opacity}
-              />
-            </g>
-          )
-        })}
-      </svg>
-      <div className="yield-wheel-nodes">
-        {FIFTHS_ORDER.map((id, i) => {
-          const opt = byId.get(id)
-          if (!opt) return null
-          const angle = (i / 7) * 360 - 90
-          const rad = (angle * Math.PI) / 180
-          const pctX = 50 + 41 * Math.cos(rad)
-          const pctY = 50 + 41 * Math.sin(rad)
-          const color = PAD_COLORS[id] ?? 'var(--text)'
-          const mul = noteYieldMultiplier(opt.lvl)
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`yield-node${opt.affordable ? ' affordable' : ''}${opt.lvl > 0 ? ' leveled' : ''}`}
-              style={{
-                ['--node-color' as string]: color,
-                left: `${pctX.toFixed(1)}%`,
-                top: `${pctY.toFixed(1)}%`,
-                ['--p' as string]: opt.progress.toFixed(3),
-              }}
-              disabled={!opt.affordable}
-              onClick={() => onBuy(id)}
-              title={
-                opt.affordable
-                  ? `Upgrade ${id} yield to lvl ${opt.lvl + 1}`
-                  : `${id} yield lvl ${opt.lvl} — costs ${formatCost(opt.cost)}`
-              }
-              aria-label={`${id} yield lvl ${opt.lvl}, ×${mul.toFixed(2)}${opt.affordable ? ' — ready to buy' : ''}`}
-            >
-              <span className="yield-node-note">{id}</span>
-              <span className="yield-node-mul">×{mul.toFixed(1)}</span>
-              {opt.lvl > 0 && (
-                <span className="yield-node-lvl">{opt.lvl}</span>
-              )}
-              <span className="yield-node-bar" aria-hidden="true" />
-            </button>
-          )
-        })}
-      </div>
-      <div className="yield-wheel-center" aria-hidden="true">
-        <span className="yield-center-label">costs</span>
-        <span className="yield-center-arrow">↻</span>
-      </div>
-    </div>
-  )
-}
-
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const progressRef = useRef<HTMLElement | null>(null)
@@ -1192,6 +1058,31 @@ function App() {
     [updateActive],
   )
 
+  const yieldAffordable = useMemo(() => {
+    const s = new Set<BodyId>()
+    for (const id of unlockedIds) {
+      const lvl = noteYieldLvls[id] ?? 0
+      const cost = noteYieldCost(id, lvl)
+      const costNote = FIFTH_NEXT[id]
+      if (unlockedIds.includes(costNote) && canAffordPurse(currencies, cost)) s.add(id)
+    }
+    return s
+  }, [unlockedIds, noteYieldLvls, currencies])
+
+  const yieldCostNoteOf = useCallback((id: BodyId) => FIFTH_NEXT[id], [])
+
+  const getYieldInfo = useCallback(
+    (id: BodyId) => {
+      const lvl = noteYieldLvls[id] ?? 0
+      const mul = noteYieldMultiplier(lvl)
+      const nextMul = mul * YIELD_STEP
+      const costNote = FIFTH_NEXT[id]
+      const costAmount = Math.round(NOTE_YIELD_BASE * COST_STEP ** lvl)
+      return { lvl, mul, nextMul, costAmount, costNote }
+    },
+    [noteYieldLvls],
+  )
+
   // Progressive disclosure: only show 1 card per category at any time so the
   // panel stays a punch-list of the next concrete action, not a wall of
   // hypotheticals. Once the player buys it, the next candidate slides in.
@@ -1215,6 +1106,7 @@ function App() {
     : []
 
   const yieldPanelUnlocked = unlockLadder.every((id) => unlockedIds.includes(id))
+  type YieldOption = { id: BodyId; lvl: number; cost: CurrencyPurse; costNote: BodyId; gateUnlocked: boolean; progress: number; affordable: boolean }
   const yieldOptions: YieldOption[] = yieldPanelUnlocked
     ? unlockedIds.map((id) => {
         const lvl = noteYieldLvls[id] ?? 0
@@ -1512,6 +1404,12 @@ function App() {
             noteYieldMul={noteYieldMul}
             onSlotChange={handleSlotChange}
             onEarn={earn}
+            yieldUnlocked={yieldPanelUnlocked}
+            noteYieldLvls={noteYieldLvls}
+            yieldAffordable={yieldAffordable}
+            yieldCostNote={yieldCostNoteOf}
+            yieldInfo={getYieldInfo}
+            onBuyYield={buyNoteYield}
           />
           <section ref={progressRef} className="resonator-progress" aria-label="Progression">
             {anyAutoPluck && visibleIdleEntries.length > 0 && (
@@ -1687,20 +1585,6 @@ function App() {
                     )
                   })}
                 </ul>
-              </div>
-            )}
-            {yieldOptions.length > 0 && (
-              <div className="prog-section prog-upgrades">
-                <h3 className="prog-h">
-                  <span className="prog-h-label">Yield</span>
-                  <span className="prog-h-sub">
-                    ×{YIELD_STEP.toFixed(1)} per level · costs flow around the circle of fifths
-                  </span>
-                </h3>
-                <YieldWheel
-                  options={yieldOptions}
-                  onBuy={buyNoteYield}
-                />
               </div>
             )}
           </section>

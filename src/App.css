@@ -1733,159 +1733,32 @@ main h1 {
   animation: none;
 }
 
-/* --- Yield wheel: circle-of-fifths competing upgrades --- */
+/* --- Yield: pulse on affordable compass dots, flash on buy --- */
 
-.yield-wheel-wrap {
-  position: relative;
-  width: min(340px, 100%);
-  aspect-ratio: 1;
-  margin: 4px auto 0;
+.yield-pulse {
+  animation: yield-dot-pulse 2s ease-in-out infinite;
 }
 
-.yield-wheel-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+@keyframes yield-dot-pulse {
+  0%, 100% { fill-opacity: 0.5; }
+  50% { fill-opacity: 0.85; }
+}
+
+.yield-pulse-ring {
   pointer-events: none;
+  animation: yield-ring-pulse 2s ease-in-out infinite;
 }
 
-.yield-wheel-nodes {
-  position: absolute;
-  inset: 0;
+@keyframes yield-ring-pulse {
+  0%, 100% { stroke-opacity: 0.12; stroke-width: 0.8; }
+  50% { stroke-opacity: 0.55; stroke-width: 2.5; }
 }
 
-.yield-node {
-  --node-color: var(--text);
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--node-color) 40%, transparent);
-  background: var(--paper);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  transition: border-color 140ms ease, box-shadow 180ms ease, transform 120ms ease;
-  overflow: hidden;
+.yield-dom-flash {
+  animation: yield-dom-glow 1.5s ease-out;
 }
 
-.yield-node:hover:not(:disabled) {
-  border-color: var(--node-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color) 14%, transparent);
-  transform: translate(-50%, -50%) scale(1.08);
-}
-
-.yield-node:disabled {
-  cursor: default;
-}
-
-.yield-node.affordable {
-  border-color: var(--node-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 18%, transparent);
-}
-
-.yield-node.affordable:hover {
-  background: color-mix(in srgb, var(--node-color) 12%, var(--paper));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-color) 22%, transparent);
-}
-
-.yield-node.leveled {
-  background: color-mix(in srgb, var(--node-color) 6%, var(--paper));
-}
-
-.yield-node-note {
-  font-family: var(--display);
-  font-style: italic;
-  font-size: 1.05rem;
-  font-weight: 400;
-  color: var(--node-color);
-  line-height: 1;
-}
-
-.yield-node-mul {
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  color: var(--text);
-  line-height: 1;
-  margin-top: 1px;
-  font-variant-numeric: tabular-nums;
-}
-
-.yield-node.leveled .yield-node-mul {
-  color: var(--node-color);
-}
-
-.yield-node-lvl {
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  min-width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--node-color);
-  color: var(--paper);
-  font-family: var(--mono);
-  font-size: 0.52rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  padding: 0 3px;
-}
-
-.yield-node-bar {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  background: conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--node-color) 22%, transparent) calc(var(--p, 0) * 360deg),
-    transparent calc(var(--p, 0) * 360deg)
-  );
-  opacity: 0.5;
-}
-
-.yield-node.affordable .yield-node-bar {
-  background: conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--node-color) 30%, transparent) 360deg,
-    transparent 360deg
-  );
-  opacity: 0.35;
-}
-
-.yield-wheel-center {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  pointer-events: none;
-}
-
-.yield-center-label {
-  font-family: var(--sc);
-  font-size: 0.52rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.yield-center-arrow {
-  font-size: 1.2rem;
-  color: var(--text-3);
-  opacity: 0.6;
-  line-height: 1;
+@keyframes yield-dom-glow {
+  0% { fill-opacity: 0.8; }
+  100% { fill-opacity: 0.22; }
 }
