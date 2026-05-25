@@ -177,10 +177,6 @@ type Props = {
   onBuyYield: (id: BodyId) => void
 }
 
-// Yield ring geometry. Sits just outside the outermost octave guide ring.
-const R_YIELD = 194
-const YIELD_RING_W = 12
-
 // Sorted chroma angles for wedge boundary computation. Each body gets
 // the angular span from the midpoint-to-previous to midpoint-to-next.
 const SORTED_CHROMA: { id: BodyId; ang: number }[] = BODIES
@@ -200,24 +196,20 @@ function wedgeBounds(id: BodyId): [number, number] {
   return [cur - dPrev / 2 + GAP_RAD, cur + dNext / 2 - GAP_RAD]
 }
 
-function arcWedgePath(
-  cx: number, cy: number,
-  rInner: number, rOuter: number,
+function pieWedgePath(
+  cx: number, cy: number, r: number,
   startAngle: number, endAngle: number,
 ): string {
   let sweep = endAngle - startAngle
   if (sweep < 0) sweep += 2 * Math.PI
   const large = sweep > Math.PI ? 1 : 0
-  const osx = cx + rOuter * Math.cos(startAngle)
-  const osy = cy + rOuter * Math.sin(startAngle)
-  const oex = cx + rOuter * Math.cos(endAngle)
-  const oey = cy + rOuter * Math.sin(endAngle)
-  const iex = cx + rInner * Math.cos(endAngle)
-  const iey = cy + rInner * Math.sin(endAngle)
-  const isx = cx + rInner * Math.cos(startAngle)
-  const isy = cy + rInner * Math.sin(startAngle)
-  return `M${osx.toFixed(1)} ${osy.toFixed(1)} A${rOuter} ${rOuter} 0 ${large} 1 ${oex.toFixed(1)} ${oey.toFixed(1)} L${iex.toFixed(1)} ${iey.toFixed(1)} A${rInner} ${rInner} 0 ${large} 0 ${isx.toFixed(1)} ${isy.toFixed(1)} Z`
+  const sx = cx + r * Math.cos(startAngle)
+  const sy = cy + r * Math.sin(startAngle)
+  const ex = cx + r * Math.cos(endAngle)
+  const ey = cy + r * Math.sin(endAngle)
+  return `M${cx} ${cy} L${sx.toFixed(1)} ${sy.toFixed(1)} A${r} ${r} 0 ${large} 1 ${ex.toFixed(1)} ${ey.toFixed(1)} Z`
 }
+
 
 // Chroma angle for each note's fundamental — same formula used by the compass.
 function bodyChromaAngle(body: Body): number {
@@ -1085,36 +1077,96 @@ export function HarvestStage({
           style={{ stroke: 'var(--border)', strokeOpacity: 0.7 }}
         />
 
-        {/* Yield ring: arc wedges at each note's chroma angle. Fill
-            opacity encodes yield level. Appears once all 7 unlock. */}
+        {/* Yield inner wedges: full pie slices inside the base ring.
+            Each wedge is a tappable upgrade button showing note, multiplier,
+            and progress toward the next level. */}
         {yieldUnlocked && BODIES.map((body) => {
           const ang = bodyChromaAngle(body)
           const lvl = noteYieldLvls[body.id] ?? 0
-          const opacity = lvl === 0 ? 0.1 : Math.min(0.5, 0.1 + lvl * 0.1)
+          const info = yieldInfo(body.id)
           const color = PAD_COLORS[body.id] ?? '#aa3bff'
           const costNoteColor = PAD_COLORS[yieldCostNote(body.id)] ?? '#aa3bff'
           const [a0, a1] = wedgeBounds(body.id)
-          const rInner = R_YIELD - YIELD_RING_W / 2
-          const rOuter = R_YIELD + YIELD_RING_W / 2
-          const pipX = CX + rInner * Math.cos(ang)
-          const pipY = CY + rInner * Math.sin(ang)
+          const isAffordable = yieldAffordable.has(body.id)
+          const isFlashing = yieldFlash === body.id
+          const isDomFlash = dominantFlash === body.id
+          const baseOpacity = lvl === 0 ? 0.08 : Math.min(0.3, 0.08 + lvl * 0.06)
+          const rLabel = R_BASE * 0.52
+          const lx = CX + rLabel * Math.cos(ang)
+          const ly = CY + rLabel * Math.sin(ang)
+          const pipR = R_BASE * 0.22
+          const pipX = CX + pipR * Math.cos(ang)
+          const pipY = CY + pipR * Math.sin(ang)
           return (
-            <g key={`yield-${body.id}`}>
+            <g
+              key={`yield-${body.id}`}
+              onPointerDown={(e) => handleCompassTap(body.id, e)}
+              style={{ cursor: 'pointer' }}
+            >
+              {/* Background wedge — level encoded as opacity */}
               <path
-                d={arcWedgePath(CX, CY, rInner, rOuter, a0, a1)}
+                d={pieWedgePath(CX, CY, R_BASE - 1, a0, a1)}
                 fill={color}
-                fillOpacity={opacity}
+                fillOpacity={isFlashing ? 0.4 : baseOpacity}
                 stroke={color}
                 strokeWidth={0.5}
-                strokeOpacity={opacity * 0.6}
+                strokeOpacity={0.15}
+                className={isAffordable ? 'yield-wedge-pulse' : isDomFlash ? 'yield-dom-flash-wedge' : undefined}
               />
-              <circle cx={pipX} cy={pipY} r={2.5} fill={costNoteColor} fillOpacity={lvl > 0 ? 0.5 : 0.25} />
+              {/* Affordable border highlight */}
+              {isAffordable && (
+                <path
+                  d={pieWedgePath(CX, CY, R_BASE - 1, a0, a1)}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.5}
+                  className="yield-wedge-border-pulse"
+                />
+              )}
+              {/* Note letter */}
+              <text
+                x={lx}
+                y={ly - 4}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontFamily="ui-monospace, Menlo, Consolas, monospace"
+                fontSize="11"
+                fontWeight={600}
+                fill={color}
+                fillOpacity={0.85}
+                style={{ pointerEvents: 'none' }}
+              >
+                {body.id}
+              </text>
+              {/* Multiplier */}
+              <text
+                x={lx}
+                y={ly + 7}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontFamily="ui-monospace, Menlo, Consolas, monospace"
+                fontSize="7"
+                fill={color}
+                fillOpacity={0.65}
+                style={{ pointerEvents: 'none' }}
+              >
+                ×{info.mul.toFixed(1)}
+              </text>
+              {/* Cost pip — small dot in the dominant's color near center */}
+              <circle
+                cx={pipX}
+                cy={pipY}
+                r={2}
+                fill={costNoteColor}
+                fillOpacity={0.35}
+                style={{ pointerEvents: 'none' }}
+              />
             </g>
           )
         })}
 
-        {/* Chroma compass: diatonic notes on the base ring. When yield
-            is unlocked, dots grow into tappable buttons with visible rings. */}
+        {/* Chroma compass: diatonic notes on the base ring. Small passive
+            markers for orientation — yield interaction is on the inner wedges. */}
         {BODIES.map((body) => {
           const ang = chromaAngleOf(TONIC_HZ * body.ratio)
           const x = CX + R_BASE * Math.cos(ang)
@@ -1123,59 +1175,15 @@ export function HarvestStage({
           const ly = CY + (R_BASE + 17) * Math.sin(ang)
           const isOn = slotted.has(body.id)
           const color = PAD_COLORS[body.id] ?? '#aa3bff'
-          const lvl = noteYieldLvls[body.id] ?? 0
-          const isAffordable = yieldUnlocked && yieldAffordable.has(body.id)
-          const isFlashing = yieldFlash === body.id
-          const isDomFlash = dominantFlash === body.id
-          const tappable = yieldUnlocked
-          const dotR = isFlashing ? 10 : tappable ? 8 : isOn ? 5.5 : 3.5
           return (
-            <g
-              key={body.id}
-              onPointerDown={tappable ? (e) => handleCompassTap(body.id, e) : undefined}
-              style={tappable ? { cursor: 'pointer' } : undefined}
-            >
-              {/* Invisible hit target for mobile taps */}
-              {tappable && (
-                <circle cx={x} cy={y} r={18} fill="transparent" />
-              )}
-              {/* Button ring — always visible when yield is unlocked */}
-              {tappable && (
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={dotR + 3}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={isAffordable ? 1.5 : 0.8}
-                  strokeOpacity={isAffordable ? 0.6 : 0.25}
-                  className={isAffordable ? 'yield-pulse-ring' : undefined}
-                />
-              )}
+            <g key={body.id}>
               <circle
                 cx={x}
                 cy={y}
-                r={dotR}
+                r={isOn ? 5.5 : 3.5}
                 fill={color}
-                fillOpacity={isFlashing ? 0.8 : tappable ? 0.35 : isOn ? 0.5 : 0.22}
-                className={isAffordable ? 'yield-pulse' : isDomFlash ? 'yield-dom-flash' : undefined}
+                fillOpacity={isOn ? 0.5 : 0.22}
               />
-              {/* Multiplier label inside the dot when yield is active */}
-              {tappable && (
-                <text
-                  x={x}
-                  y={y + 0.5}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontFamily="ui-monospace, Menlo, Consolas, monospace"
-                  fontSize="7"
-                  fill={color}
-                  fillOpacity={0.9}
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {lvl > 0 ? `×${(1.5 ** lvl).toFixed(1)}` : '×1'}
-                </text>
-              )}
               <text
                 x={lx}
                 y={ly}
@@ -1183,11 +1191,11 @@ export function HarvestStage({
                 dominantBaseline="middle"
                 fontFamily="ui-monospace, Menlo, Consolas, monospace"
                 fontSize="13"
-                fontWeight={isOn || tappable ? 600 : 400}
-                fill={isOn || tappable ? color : '#1a120a'}
-                fillOpacity={isOn || tappable ? 1 : 0.75}
+                fontWeight={isOn ? 600 : 400}
+                fill={isOn ? color : '#1a120a'}
+                fillOpacity={isOn ? 1 : 0.75}
               >
-                {body.id}{yieldUnlocked && lvl > 0 ? String.fromCharCode(0x2080 + lvl) : ''}
+                {body.id}
               </text>
             </g>
           )

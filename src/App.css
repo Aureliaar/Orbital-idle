@@ -1769,6 +1769,25 @@ main h1 {
   50% { stroke-opacity: 0.8; stroke-width: 2.5; }
 }
 
+.yield-wedge-pulse {
+  animation: yield-wedge-bg-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes yield-wedge-bg-pulse {
+  0%, 100% { fill-opacity: 0.08; }
+  50% { fill-opacity: 0.2; }
+}
+
+.yield-wedge-border-pulse {
+  pointer-events: none;
+  animation: yield-wedge-stroke-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes yield-wedge-stroke-pulse {
+  0%, 100% { stroke-opacity: 0.15; }
+  50% { stroke-opacity: 0.6; }
+}
+
 .yield-dom-flash {
   animation: yield-dom-glow 1.5s ease-out;
 }
@@ -1776,4 +1795,13 @@ main h1 {
 @keyframes yield-dom-glow {
   0% { fill-opacity: 0.8; }
   100% { fill-opacity: 0.22; }
+}
+
+.yield-dom-flash-wedge {
+  animation: yield-dom-wedge-glow 1.5s ease-out;
+}
+
+@keyframes yield-dom-wedge-glow {
+  0% { fill-opacity: 0.3; }
+  100% { fill-opacity: 0.08; }
 }
